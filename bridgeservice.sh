@@ -1,21 +1,25 @@
 #!/data/data/com.termux/files/usr/bin/bash
 # bridgeservice.sh - manage bridgeservice.py in Termux
-BRIDGE_HOME="$HOME/bridgeservice"
+BRIDGE_HOME="/data/data/com.termux/files/home/bridgeservice"
 BRIDGE_PY="$BRIDGE_HOME/bridgeservice.py"
-LOG_FILE="$BRIDGE_HOME/logs/service.log"
+LOG_DIR="$BRIDGE_HOME/logs"
+LOG_FILE="$LOG_DIR/service.log"
+ALT_LOG="/data/local/tmp/bridge_autostart.log"
 
 start() {
-    mkdir -p "$BRIDGE_HOME/logs"
+    mkdir -p "$LOG_DIR"
     if pgrep -f "python .*bridgeservice.py" >/dev/null 2>&1; then
         echo "[BridgeService] Already running (pid: $(pgrep -f 'python .*bridgeservice.py' | head -n1))"
         return 0
     fi
-    nohup python "$BRIDGE_PY" > "$LOG_FILE" 2>&1 &
+    echo "[BridgeService] Starting..."
+    nohup python -u "$BRIDGE_PY" >> "$LOG_FILE" 2>&1 &
     sleep 2
     if pgrep -f "python .*bridgeservice.py" >/dev/null 2>&1; then
         echo "[BridgeService] Started (pid: $(pgrep -f 'python .*bridgeservice.py' | head -n1))"
+        echo "Log file: $LOG_FILE"
     else
-        echo "[BridgeService] Failed to start. Check $LOG_FILE"
+        echo "[BridgeService] Failed to start. Check log manually."
     fi
 }
 
@@ -46,9 +50,15 @@ status() {
 getinfo() {
     if [ -f "$LOG_FILE" ]; then
         echo "[BridgeService] Device Info:"
-        local info=$(grep -a '"type":"bridge_hello"' "$LOG_FILE" | tail -n 1)
+        # Cari baris terakhir yang mengandung bridge_hello
+        local info=$(grep -a "'type': 'bridge_hello'" "$LOG_FILE" | tail -n 1)
         if [ -n "$info" ]; then
-            echo "$info" | grep -oE '"(serial|android_id|device_model)"[^,}]*'
+            # Bersihkan prefix log
+            info=$(echo "$info" | sed "s/.*Received message without action: //")
+            # Ubah kutip tunggal ke ganda supaya bisa diproses grep
+            info=$(echo "$info" | sed "s/'/\"/g")
+            # Tampilkan beberapa field penting
+            echo "$info" | grep -oE '"(brand|model|android|serial|ip_local)"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/"//g' | sed 's/: /= /'
         else
             echo "  No bridge_hello data found in logs."
         fi
@@ -58,26 +68,39 @@ getinfo() {
 }
 
 getToken() {
-    if [ -f "$LOG_FILE" ]; then
-        echo "[BridgeService] Extracting token from log..."
-        local token=$(grep -a '"token":"' "$LOG_FILE" | tail -n 1 | grep -oE '"token":"[^"]+' | cut -d'"' -f4)
-        if [ -n "$token" ]; then
-            echo "Token: $token"
-        else
-            echo "No token found in logs."
-        fi
+    local log=""
+    if [ -f "$LOG_FILE" ]; then log="$LOG_FILE"
+    elif [ -f "$ALT_LOG" ]; then log="$ALT_LOG"
+    fi
+
+    if [ -z "$log" ]; then
+        echo "[BridgeService] No log file found."
+        return
+    fi
+
+    echo "[BridgeService] Extracting token..."
+    local token=$(grep -a '"token":"' "$log" | tail -n 1 | grep -oE '"token":"[^"]+' | cut -d'"' -f4)
+    if [ -n "$token" ]; then
+        echo "Token: $token"
     else
-        echo "[BridgeService] Log file not found: $LOG_FILE"
+        echo "No token found in logs."
     fi
 }
 
 logs() {
-    if [ -f "$LOG_FILE" ]; then
-        echo "[BridgeService] Showing last 20 lines of log:"
-        tail -n 20 "$LOG_FILE"
-    else
-        echo "[BridgeService] Log file not found: $LOG_FILE"
+    local log=""
+    if [ -f "$LOG_FILE" ]; then log="$LOG_FILE"
+    elif [ -f "$ALT_LOG" ]; then log="$ALT_LOG"
     fi
+
+    if [ -z "$log" ]; then
+        echo "[BridgeService] No log file found."
+        return
+    fi
+
+    local n=${1:-20}
+    echo "[BridgeService] Showing last $n lines of log ($log):"
+    tail -n "$n" "$log"
 }
 
 case "$1" in
@@ -87,9 +110,9 @@ case "$1" in
     status) status ;;
     getinfo) getinfo ;;
     getToken) getToken ;;
-    logs) logs ;;
+    logs) logs "$2" ;;   # contoh: ./bridgeservice.sh logs 50
     *)
-        echo "Usage: $0 {start|stop|restart|status|getinfo|getToken|logs}"
+        echo "Usage: $0 {start|stop|restart|status|getinfo|getToken|logs [lines]}"
         exit 1
         ;;
 esac
