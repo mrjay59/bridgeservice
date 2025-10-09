@@ -1,10 +1,33 @@
-#!/data/data/com.termux/files/usr/bin/bash
-# bridgeservice.sh - manage bridgeservice.py in Termux
-BRIDGE_HOME="/data/data/com.termux/files/home/bridgeservice"
+#!/system/bin/sh
+# bridgeservice.sh - manage bridgeservice.py in Termux (support Magisk)
+
+TERMUX_BASE="/data/data/com.termux/files"
+PYTHON_BIN="$TERMUX_BASE/usr/bin/python"
+BRIDGE_HOME="$TERMUX_BASE/home/bridgeservice"
 BRIDGE_PY="$BRIDGE_HOME/bridgeservice.py"
 LOG_DIR="$BRIDGE_HOME/logs"
 LOG_FILE="$LOG_DIR/service.log"
 ALT_LOG="/data/local/tmp/bridge_autostart.log"
+
+export HOME="$TERMUX_BASE/home"
+export PATH="$TERMUX_BASE/usr/bin:$TERMUX_BASE/usr/bin/applets:$PATH"
+
+install() {
+    echo "[BridgeService] Installing dependencies..."
+    if [ ! -x "$TERMUX_BASE/usr/bin/pkg" ]; then
+        echo "[!] Termux environment not detected. Run this from Termux."
+        return 1
+    fi
+
+    # Jalankan setup terpisah
+    local setup_script="$BRIDGE_HOME/setup_bridgeservice.sh"
+    if [ -f "$setup_script" ]; then
+        bash "$setup_script"
+    else
+        echo "[BridgeService] setup_bridgeservice.sh not found in $BRIDGE_HOME"
+        echo "Please copy it there before running install."
+    fi
+}
 
 start() {
     mkdir -p "$LOG_DIR"
@@ -13,7 +36,7 @@ start() {
         return 0
     fi
     echo "[BridgeService] Starting..."
-    nohup python -u "$BRIDGE_PY" >> "$LOG_FILE" 2>&1 &
+    nohup "$PYTHON_BIN" -u "$BRIDGE_PY" >> "$LOG_FILE" 2>&1 &
     sleep 2
     if pgrep -f "python .*bridgeservice.py" >/dev/null 2>&1; then
         echo "[BridgeService] Started (pid: $(pgrep -f 'python .*bridgeservice.py' | head -n1))"
@@ -104,15 +127,16 @@ logs() {
 }
 
 case "$1" in
+    install) install ;;
     start) start ;;
     stop) stop ;;
     restart) restart ;;
     status) status ;;
     getinfo) getinfo ;;
     getToken) getToken ;;
-    logs) logs "$2" ;;   # contoh: ./bridgeservice.sh logs 50
+    logs) logs "$2" ;;
     *)
-        echo "Usage: $0 {start|stop|restart|status|getinfo|getToken|logs [lines]}"
+        echo "Usage: $0 {install|start|stop|restart|status|getinfo|getToken|logs [lines]}"
         exit 1
         ;;
 esac
