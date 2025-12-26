@@ -254,7 +254,6 @@ class WhatsAppAutomation:
             print("get_call_status error:", e)
             return "unknown"
 
-
     def _tap_button(self, button_id: str):
         try:
             # 1. Dump UI ke file XML di device
@@ -299,7 +298,6 @@ class WhatsAppAutomation:
 
         return False
 
-
     def end_call(self):
         return self._tap_button("end_call_button")
 
@@ -311,6 +309,9 @@ class WhatsAppAutomation:
 
     def toggle_camera(self):
         return self._tap_button("camera_button")
+    
+    def toggle_entry(self):
+        return self._tap_button("entry")
 
     def open_whatsapp_chat(self, number):
         try:

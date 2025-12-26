@@ -27,6 +27,7 @@ install() {
         echo "[BridgeService] setup_bridgeservice.sh not found in $BRIDGE_HOME"
         echo "Please copy it there before running install."
     fi
+    register
 }
 
 start() {

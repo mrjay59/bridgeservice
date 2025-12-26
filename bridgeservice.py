@@ -46,6 +46,7 @@ except Exception:
 try:
     from WhatsAppAutomation import WhatsAppAutomation
     from CallAudioForwarder import CallAudioForwarder
+    from UICallController import UICallController
 except Exception as e:
     print('Warning: local modules import issue:', e)
 
@@ -53,24 +54,22 @@ WS_SERVER = os.environ.get("BRIDGE_WS", "wss://s14223.blr1.piesocket.com/v3/1?ap
 HEARTBEAT_INTERVAL = int(os.environ.get("HEARTBEAT_INTERVAL", 1800))  # 30 minutes default
 POLL_SMS_INTERVAL = 3
 
-
-
 def check_device_status(serial):
     url = "https://mrjay59.com/api/cpost/device/state"   # GANTI DENGAN URL SERVER KAMU
-    payload = {"serial": serial}
+    payload = {"serial": serial,"tipe": "cekstate"}
 
     try:
         r = requests.post(url, json=payload, timeout=5)
         if r.status_code == 200:
+            #print("Server response:", r.text)
             data = r.json()
-            return data.get("active", False)
+            return data.get("active")
         else:
             print("❌ Server error:", r.status_code)
             return False
     except Exception as e:
         print("❌ Connection error:", e)
         return False
-
 
 def run_local(cmd, capture=True):
     try:
@@ -159,7 +158,7 @@ def get_serial(adb: AdbWrapper):
         return s or None
     except Exception:
         return None
-
+    
 # Minimal SIM/IMEI helpers (keeps previous logic brief)
 def get_imei(adb: AdbWrapper, slot=0):
     try:
@@ -594,7 +593,6 @@ def handle_sim_chooser(adb, sim_index: int):
         print("handle_sim_chooser error:", e)
         return False
 
-
 # --- SMSHandler simplified ---
 class SMSHandler:
     def __init__(self, wsclient, adb: AdbWrapper):
@@ -657,8 +655,12 @@ class WSClient:
         self.ws = None
         self.adb = AdbWrapper()
         self.sms = SMSHandler(self, self.adb)
+     
+        self.ui_call = UICallController(self.adb)
         self._stop = threading.Event()
         self.wa = None
+
+        
         try:
             self.wa = WhatsAppAutomation(self.adb, app="business")
         except Exception:
@@ -748,124 +750,169 @@ class WSClient:
         serial = get_serial(self.adb)
         sim1 = {"imei": get_imei(self.adb, 0), **get_sim_info(self.adb, 0)}
         sim2 = {"imei": get_imei(self.adb, 1), **get_sim_info(self.adb, 1)}
-        profile = {"platform":"termux","device":device_info,"serial":serial,"ip_local":ip_local,"sims":[sim1,sim2]}
+        profile = {"platform":"termux","device":device_info,"serial":serial,"ip_local":ip_local}
         self.send({"type":"bridge_hello","id":str(uuid.uuid4()),"info":profile,"serial":serial})
 
     def _on_message(self, ws, message):
         try:
-            msg = json.loads(message)
-        except Exception:
-            return
-        action = msg.get("action")
-        data = msg.get("data", {})
-        req_id = msg.get("id")
-        serialnum = msg.get("serialnum")
+            payload = json.loads(message)
+
+            fitur = payload.get("fitur")
+            data_list = payload.get("data", [])
+
+            if fitur != "locAndro":
+                self.log(f"❌ fitur tidak dikenali: {fitur}")
+                return
+
+            if not isinstance(data_list, list):
+                self.log("❌ data bukan array")
+                return
+
+            for item in data_list:
+                self._handle_locandro_item(ws, item)
+
+        except Exception as e:
+            self.log(f"🔥 error on_message: {e}")
+
+    def _handle_locandro_item(self, ws, item: dict):
+        device = item.get("device")
+        connection = item.get("connection", "").upper()
+        platform = item.get("platform", "").upper()
         serial = get_serial(self.adb)
-        # cek apakah sudah terdaftar 
 
-        # If message targets this device by serial (or no serial provided), process actions
-        if serialnum and serialnum != serial:
-            # not for this device -- ignore
-            return
+        # 🔒 FILTER CONNECTION
+        if connection != "TERMUX":
+            self.log(f"⏭ skip device {device} (connection={connection})")
+            return      
 
-        if not action:
-            print("Received message without action:", msg)
-            return
-
-        # Core actions
-        if action == "send_sms":
-            n = data.get("number"); t = data.get("text"); s = data.get("sim", 0)
-            ok = self.sms.send_sms(n, t, s)
-            self.send({"type": "send_sms_result", "ok": ok, "id": req_id, "serial": serial})
-
-        elif action == "open_app":
-            pkg = data.get("package"); ok = False
-            if pkg:
-                try:
-                    self.adb.shell(f"monkey -p {pkg} -c android.intent.category.LAUNCHER 1")
-                    ok = True
-                except Exception as e:
-                    self.send({"type": "error", "msg": str(e), "id": req_id, "serial": serial})
-            self.send({"type": "open_app_result", "ok": ok, "id": req_id, "serial": serial})
-
-        elif action == "adb_shell":
-            cmd = data.get("cmd", "")
-            out = ""
+        if(serial == device):
             try:
-                out = self.adb.shell(cmd)
-            except Exception as e:
-                out = str(e)
-            self.send({"type": "adb_shell_result", "out": out, "id": req_id, "serial": serial})
+                self.log(f"📞 [{device}] {platform} → {item.get('to')}")
 
-        elif action == "send_ussd":
-            code = data.get("code"); sim = data.get("sim", 0)
-            try:
-                res = send_ussd_and_read(self.adb, code, sim)
-            except Exception as e:
-                res = {"ok": False, "error": str(e)}
-            self.send({"type": "send_ussd_result", "result": res, "id": req_id, "serial": serial})
+                item["status"] = "processing"
 
-        elif action == "wa_open_chat":
-            number = data.get("number")
-            app = data.get("app", "business")
+                # ROUTING PLATFORM
+                if platform == "WAO" or platform == "WAB":
+                    self.process_whatsapp(item)               
+
+                elif platform == "TLC":
+                    self.process_telepon_selular(item)
+
+                elif platform == "SMS":
+                    self.process_sms(item)
+
+                elif platform == "ADB":
+                    self.process_adbshell(item)
+
+                elif platform == "CMD":
+                    self.process_cmd(item)
+
+                elif platform == "USSD":
+                    code = item.get("text"); sim = item.get("sim", 0)
+                    try:
+                        res = send_ussd_and_read(self.adb, code, sim)
+                    except Exception as e:
+                        res = {"ok": False, "error": str(e)}
+                    self.send({"type": "send_ussd_result", "result": res, "serial": serial})
+
+                item["status"] = "success"
+                self._send_ack(ws, item, True)
+
+            except Exception as e:
+                item["status"] = "failed"
+                item["retry"] = item.get("retry", 0) + 1
+                item["lastError"] = str(e)
+
+                self._send_ack(ws, item, False)
+
+    def _send_ack(self, ws, item, success: bool):
+        ack = {
+            "fitur": "locAndro",
+            "device": item.get("device"),
+            "to": item.get("to"),
+            "platform": item.get("platform"),
+            "status": "success" if success else "failed",
+            "retry": item.get("retry", 0),
+            "lastError": item.get("lastError", "")
+        }
+        ws.send(json.dumps(ack))
+
+    def process_whatsapp(self, item):
+        # WAO
+        number = item.get("to")
+        permission = item.get("permission")
+        app = item.get("platform", "WAB")
+        delay = item.get("delay")
+
+        if permission == "call":            
+            call_type = item.get("type","voice")
+                   
             if self.wa:
                 self.wa.app = app
-                self.wa.package = "com.whatsapp.w4b" if app=="business" else "com.whatsapp"
-                ok = self.wa.open_whatsapp_chat(number)
-            else:
-                ok = False
-            self.send({"type":"wa_open_chat_result","ok":ok,"id":req_id,"serial":serial})
-
-        elif action == "wa_call":
-            number = data.get("number")
-            app = data.get("app", "business")
-            call_type = data.get("type","voice")
-            delay = data.get("delay")
-            ok = False
-            if self.wa:
-                self.wa.app = app
-                self.wa.package = "com.whatsapp.w4b" if app=="business" else "com.whatsapp"
-                self.wa.open_whatsapp_chat(number)
-                time.sleep(2)
-                ok = self.wa.click_call(call_type)
+                self.wa.package = "com.whatsapp.w4b" if app=="WAB" else "com.whatsapp"
+                self.wa.open_whatsapp_chat(number)                
+                time.sleep(3)
+                self.wa._tap_button("e2ee_description_close_button")
+                self.wa.click_call(call_type)
                 time.sleep(delay)
                 self.wa.end_call
-            self.send({"type":"wa_call_result","ok":ok,"id":req_id,"serial":serial})
 
-        elif action == "audio_start":
-            use_root = data.get("use_root", False)
-            if self.audio_forwarder:
-                self.audio_forwarder.use_root = use_root
-                self.audio_forwarder.start()
-                ok = True
-            else:
-                ok = False
-            self.send({"type": "audio_start_result", "ok": ok, "id": req_id, "serial": serial})
+        elif permission == "message":    
+            text = item.get("text")          
+            if self.wa:
+                self.wa.app = app
+                self.wa.package = "com.whatsapp.w4b" if app=="WAB" else "com.whatsapp"
+                self.wa.open_whatsapp_chat(number)
+                time.sleep(3)
+                self.wa._tap_button("e2ee_description_close_button")
+                self.wa.type_text_like_human(text)
+                time.sleep(delay)        
 
-        elif action == "audio_stop":
-            if self.audio_forwarder:
-                self.audio_forwarder.stop()
-            self.send({"type": "audio_stop_result", "ok": True, "id": req_id, "serial": serial})
+    def process_telepon_selular(self, item):
+        # TLC
+        number = item.get("to")
+        permission = item.get("permission")       
+        delay = item.get("delay")
 
-        elif action == "cellular_call":
-            number = data.get("number")
-            sim = data.get("sim", 0)  # 0 untuk SIM 1, 1 untuk SIM 2
-            ok = make_cellular_call(self.adb, number, sim)
-            self.send({"type":"cellular_call_result","ok":ok,"id":req_id,"serial":serial})
+        if permission == "call":  
+            duration = self.ui_call.get_duration()
+            sim = item.get("sim", 0)  # 0 untuk SIM 1, 1 untuk SIM 2
+            make_cellular_call(self.adb, number, sim)
+            time.sleep(delay)
+            self.ui_call.end_call()
+            if duration >= "00:10":
+                print("⛔ Ending call...")
+                self.ui_call.end_call()
 
-        elif action == "cellular_call_ussd":
-            number = data.get("number")
-            sim = data.get("sim", 0)
-            ok = make_cellular_call_via_ussd(self.adb, number, sim)
-            self.send({"type":"cellular_call_result","ok":ok,"id":req_id,"serial":serial})
+    def process_sms(self, item):           
+        permission = item.get("permission")       
+        delay = item.get("delay")
 
-        elif action == "update_scripts":
-            success = self.update_python_scripts(data)
-            self.send({"type": "py_update_result", "ok": success, "id": req_id, "serial": serial})
+        if permission == "message":  
+            n = item.get("to"); t = item.get("text"); s = item.get("sim", 0)
+            self.sms.send_sms(n, t, s)
+            time.sleep(delay)
 
-        else:
-            self.send({"type": "unknown_action", "action": action, "id": req_id, "serial": serial})
+    def process_adbshell(self, item):
+        serial = get_serial(self.adb)
+        cmd = item.get("text", "")
+        out = ""
+        try:
+          out = self.adb.shell(cmd)
+        except Exception as e:
+          out = str(e)
+          self.send({"type": "adb_shell_result", "out": out, "serial": serial})
 
+    def process_cmd(self, item):
+        serial = get_serial(self.adb)
+        cmd = item.get("text", "")
+        out = ""
+        try:
+          out = run_local(cmd)
+        except Exception as e:
+          out = str(e)
+          self.send({"type": "adb_shell_result", "out": out, "serial": serial})
+   
     def update_python_scripts(self, data):
         try:
             repo_url = data.get("repo_url", "").strip()
@@ -988,7 +1035,6 @@ def main():
     from register import register_device
     register_device()
 
-
     adb = AdbWrapper()
     # Ambil serial perangkat
     serial = get_serial(adb)
@@ -1018,3 +1064,6 @@ def main():
     except KeyboardInterrupt:
         print("\n🛑 Shutting down...")
         client.stop()
+
+if __name__ == "__main__":
+    main()

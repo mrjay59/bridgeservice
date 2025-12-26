@@ -13,24 +13,16 @@ ROOT = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(ROOT)
 
 try:
-    from bridgeservice import get_device_info, get_sim_info, get_serial, AdbWrapper
+    from bridgeservice import (
+        get_device_info,
+        get_sim_info,
+        get_serial,
+        get_local_ip,
+        AdbWrapper
+    )
 except Exception as e:
     print("❌ Tidak dapat memuat fungsi dari bridgeservice.py:", e)
     sys.exit(1)
-
-
-# ===============================================
-# Ambil IP lokal
-# ===============================================
-def get_local_ip():
-    try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.connect(("8.8.8.8", 80))
-        ip = s.getsockname()[0]
-        s.close()
-        return ip
-    except:
-        return "0.0.0.0"
 
 
 # ===============================================
@@ -38,14 +30,22 @@ def get_local_ip():
 # ===============================================
 def register_device():
     adb = AdbWrapper()
+
+    # Ambil serial
     serial = get_serial(adb)
     if not serial:
         print("❌ Serial perangkat tidak ditemukan")
         return
 
-    device_info = get_device_info()
-    sim1, sim2 = get_sim_info()
-    ip_local = get_local_ip()
+    # Ambil info device
+    device_info = get_device_info(adb)
+
+    # Ambil info SIM
+    sim1 = get_sim_info(adb, 0)
+    sim2 = get_sim_info(adb, 1)
+
+    # Ambil IP lokal
+    ip_local = get_local_ip(adb)
 
     profile = {
         "platform": "termux",
@@ -56,16 +56,15 @@ def register_device():
     }
 
     print("📡 Mengirim data registrasi ke server...")
-    print(json.dumps(profile, indent=2))
+    print(json.dumps(profile, indent=2, ensure_ascii=False))
 
-    # GANTI URL DI BAWAH INI
+    # GANTI URL JIKA PERLU
     url = "https://mrjay59.com/api/cpost/device/register"
 
     try:
         r = requests.post(url, json=profile, timeout=10)
         if r.status_code == 200:
-            data = r.json()
-            print("✅ Registrasi berhasil! data serial")
+          # print("✅ Registrasi berhasil!")
             print("Server response:", r.text)
         else:
             print("❌ Registrasi gagal:", r.status_code, r.text)
