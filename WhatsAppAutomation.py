@@ -4,6 +4,8 @@ import base64
 from PIL import Image
 import io
 import threading
+import time
+import random
 
 class WhatsAppAutomation:
     def __init__(self, adb, app="business"):
@@ -201,33 +203,102 @@ class WhatsAppAutomation:
                             print("qr process error:", e)
                             return None
         return None
-
+           
     def get_call_status(self):
         try:
-            out = self.adb.shell("dumpsys activity top") or ""
-            if "VoipActivityV3" not in out and "voip" not in out.lower():
+            # 1️⃣ Dump UI ke XML
+            self.adb.shell("uiautomator dump /sdcard/window_dump.xml")
+            time.sleep(0.4)
+
+            xml = self.adb.shell("cat /sdcard/window_dump.xml")
+            if "<?xml" not in xml:
                 return "idle"
-            # try find subtitle text longer than 2 chars
-            m = re.search(r'text=\"([^\"]{2,50})\"', out)
-            if m:
-                return m.group(1)
+
+            try:
+                root = ET.fromstring(xml[xml.index("<?xml"):])
+            except Exception as e:
+                print("xml parse error:", e)
+                return "idle"
+
+            # 2️⃣ Cek apakah sedang di UI panggilan (VoIP)
+            is_voip = False
+            for node in root.iter("node"):
+                res_id = node.attrib.get("resource-id", "") or ""
+                desc = node.attrib.get("content-desc", "") or ""
+
+                if "call" in res_id.lower() or "call" in desc.lower():
+                    is_voip = True
+                    break
+
+            if not is_voip:
+                return "idle"
+
+            # 3️⃣ Kandidat teks status panggilan
+            status_candidates = [
+                "Berdering", "Memanggil", "Sedang", "Ended",
+                "Panggilan", "Calling", "Ringing", "Connected"
+            ]
+
+            # 4️⃣ Cari teks status pada semua node
+            for node in root.iter("node"):
+                txt = node.attrib.get("text", "")
+                if txt:
+                    for s in status_candidates:
+                        if s.lower() in txt.lower():
+                            return txt.strip()
+
+            # 5️⃣ Default jika UI panggilan tetapi teks status tidak ditemukan
             return "in_call"
-        except Exception:
+
+        except Exception as e:
+            print("get_call_status error:", e)
             return "unknown"
 
-    def _tap_button(self, button_id):
+
+    def _tap_button(self, button_id: str):
         try:
-            out = self.adb.shell("dumpsys activity top") or ""
-            m = re.search(rf'{button_id}.*?(\d+),(\d+)-(\d+),(\d+)', out)
-            if m:
-                x1,y1,x2,y2 = map(int, m.groups())
-                cx,cy = (x1+x2)//2,(y1+y2)//2
-                self.adb.shell(f"input tap {cx} {cy}")
-                time.sleep(1)
-                return True
+            # 1. Dump UI ke file XML di device
+            self.adb.shell("uiautomator dump /sdcard/window_dump.xml")
+            time.sleep(0.5)
+
+            # 2. Ambil file XML
+            xml = self.adb.shell("cat /sdcard/window_dump.xml")
+            if "<?xml" not in xml:
+                return False
+
+            # 3. Parse XML
+            try:
+                root = ET.fromstring(xml[xml.index("<?xml"):])
+            except Exception as e:
+                print("parse xml error:", e)
+                return False
+
+            # 4. Cari semua node
+            for node in root.iter("node"):
+                res_id = node.attrib.get("resource-id") or ""
+
+                # sama seperti VB.NET → resId.Contains(buttonId)
+                if button_id in res_id:
+                    bounds = node.attrib.get("bounds")
+                    if not bounds:
+                        continue
+
+                    nums = re.findall(r"\d+", bounds)
+                    if len(nums) == 4:
+                        x1, y1, x2, y2 = map(int, nums)
+                        cx = (x1 + x2) // 2
+                        cy = (y1 + y2) // 2
+
+                        # 5. Tap tengah tombol
+                        self.adb.shell(f"input tap {cx} {cy}")
+                        time.sleep(0.7)
+                        return True
+
         except Exception as e:
             print("_tap_button error:", e)
+
         return False
+
 
     def end_call(self):
         return self._tap_button("end_call_button")
@@ -265,6 +336,111 @@ class WhatsAppAutomation:
         except Exception as e:
             print("open_whatsapp_chat error:", e)
             return False
+        
+    def open_wa(self, userclone, phone_number, fungsi, txtpes):
+        try:
+          
+            # 2️⃣ Buka chat WA via deeplink (punya user / clone tertentu)
+            #     Dalam VB.NET = "am start {userclone} -a ... {pkg}"
+            self.adb.shell(
+                f"am start {userclone} -a android.intent.action.VIEW "
+                f"-d 'https://wa.me/{phone_number}' {self.package}"
+            )
+
+            time.sleep(1.5)
+
+            # ===========================================================
+            # MODE CHAT / MESSAGE
+            # ===========================================================
+            if fungsi == "message":
+
+                # Fokus pada input message (KlikTouch("entry", pkg))
+                time.sleep(1)
+                self._klik_touch("entry", self.package)
+
+                # Ketik seperti manusia
+                time.sleep(1)
+                self._type_text_like_human(txtpes)
+
+                # Tekan tombol send
+                time.sleep(1)
+                self._send_message()
+
+            # ===========================================================
+            # MODE CALL
+            # ===========================================================
+            elif fungsi == "call":
+                # Cari elemen header nama kontak
+                el_call = self._find_element(f"//node[@resource-id='{self.package}:id/conversation_contact_name']")
+
+                if el_call is not None:
+                    # Tekan tombol close E2EE (end-to-end)
+                    self._tap_button("e2ee_description_close_button")
+
+                    time.sleep(1.5)
+
+                    # Panggilan voice
+                    self._voice_call()
+
+            return True
+
+        except Exception as e:
+            print("open_wa error:", e)
+            return False
+        
+    def _klik_touch(self, key, pkg):
+        # cari tombol berdasarkan resource-id yang mengandung key
+        xml = self.dump_ui()
+        try:
+            root = ET.fromstring(xml[xml.index("<?xml"):])
+            for node in root.iter("node"):
+                rid = node.attrib.get("resource-id") or ""
+                if key in rid:
+                    bounds = node.attrib.get("bounds")
+                    if bounds:
+                        x1,y1,x2,y2 = map(int, re.findall(r"\d+", bounds))
+                        cx,cy = (x1+x2)//2, (y1+y2)//2
+                        self.adb.shell(f"input tap {cx} {cy}")
+                        return True
+        except:
+            pass
+        return False
+
+    def type_text_like_human(self, txtpes: str):
+        try:
+            time.sleep(0.8)  # delay awal sebelum mengetik
+
+            for ch in txtpes:
+                if ch == " ":
+                    # spasi
+                    self.adb.shell("input keyevent 62")  # KEYCODE_SPACE
+
+                elif ch in ("\n", "\r"):
+                    # enter / newline
+                    self.adb.shell("input keyevent 66")  # KEYCODE_ENTER
+
+                else:
+                    # character biasa
+                    key = self._escape_adb_text(ch)
+                    self.adb.shell(f"input text {key}")
+
+                # delay seperti manusia: 80–160ms
+                time.sleep(self._random_delay(0.08, 0.16))
+
+        except Exception as e:
+            print("type_text_like_human error:", e)
+
+    def _escape_adb_text(self, ch: str) -> str:
+        # sama seperti VB → handle karakter spesial agar aman di shell
+        if ch == "'":
+            return "\\'"
+        elif ch in "&|><();!#$`\\\"":
+            return "\\" + ch
+        else:
+            return ch
+
+    def _random_delay(self, min_s: float, max_s: float) -> float:
+        return random.uniform(min_s, max_s)
 
     def dump_ui(self, path="/sdcard/wa_dump.xml"):
         try:

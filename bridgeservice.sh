@@ -110,6 +110,11 @@ getToken() {
     fi
 }
 
+register() {
+    echo "[BridgeService] Running registration..."
+    "$PYTHON_BIN" register.py
+}
+
 logs() {
     local log=""
     if [ -f "$LOG_FILE" ]; then log="$LOG_FILE"
@@ -135,6 +140,7 @@ case "$1" in
     getinfo) getinfo ;;
     getToken) getToken ;;
     logs) logs "$2" ;;
+    register) register ;;        # ← DITAMBAHKAN DI SINI
     *)
         echo "Usage: $0 {install|start|stop|restart|status|getinfo|getToken|logs [lines]}"
         exit 1

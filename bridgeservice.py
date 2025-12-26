@@ -16,7 +16,10 @@ import base64
 import threading
 import subprocess
 import sys
+import requests
+import urllib.parse  # Pindah import ke atas
 from datetime import datetime, timezone
+
 
 try:
     import websocket
@@ -49,6 +52,25 @@ except Exception as e:
 WS_SERVER = os.environ.get("BRIDGE_WS", "wss://s14223.blr1.piesocket.com/v3/1?api_key=WVXN94EfJrQO7fSpSwwKJZgxbavdLdKLZBPLLlQR&notify_self=1")
 HEARTBEAT_INTERVAL = int(os.environ.get("HEARTBEAT_INTERVAL", 1800))  # 30 minutes default
 POLL_SMS_INTERVAL = 3
+
+
+
+def check_device_status(serial):
+    url = "https://mrjay59.com/api/cpost/device/state"   # GANTI DENGAN URL SERVER KAMU
+    payload = {"serial": serial}
+
+    try:
+        r = requests.post(url, json=payload, timeout=5)
+        if r.status_code == 200:
+            data = r.json()
+            return data.get("active", False)
+        else:
+            print("❌ Server error:", r.status_code)
+            return False
+    except Exception as e:
+        print("❌ Connection error:", e)
+        return False
+
 
 def run_local(cmd, capture=True):
     try:
@@ -153,7 +175,6 @@ def get_sim_info(adb: 'AdbWrapper', slot=0):
     Mengambil informasi nomor SIM dari device via ADB.
     Menggunakan metode adb.shell() dari class AdbWrapper.
     """
-
     info = {}
     cmds = [
         f"service call iphonesubinfo {slot + 7}",
@@ -220,7 +241,6 @@ def capture_screenshot_base64(adb: AdbWrapper):
     return None
 
 # ----------------- USSD helper -----------------
-import urllib.parse
 def _encode_ussd(code: str) -> str:
     # encode '#' etc
     return urllib.parse.quote(code, safe='')
@@ -405,13 +425,28 @@ def send_ussd_and_read(adb: AdbWrapper, code: str, sim: int = 0, wait_response_s
     except Exception as e:
         result['error'] = str(e)
         return result
+
+# --- Fungsi helper untuk cellular call (standalone) ---
+def clean_phone_number(number):
+    """
+    Membersihkan format nomor telepon
+    """
+    cleaned = re.sub(r'[^\d+]', '', str(number))
     
-def make_cellular_call(self, number, sim=0):
+    # Format Indonesia: ubah 0xxx menjadi +62xxx
+    if cleaned.startswith('0') and not cleaned.startswith('+'):
+        cleaned = '+62' + cleaned[1:]
+    elif not cleaned.startswith('+'):
+        cleaned = '+62' + cleaned
+        
+    return cleaned
+
+def make_cellular_call(adb: AdbWrapper, number, sim=0):
     """
     Melakukan panggilan selular biasa dengan pemilihan SIM
     """
     try:
-        number = self._clean_phone_number(number)
+        number = clean_phone_number(number)
         sim_index = int(sim)
         
         # Method 1: Menggunakan intent dengan extra SIM slot
@@ -424,11 +459,11 @@ def make_cellular_call(self, number, sim=0):
         
         for intent in intents:
             try:
-                result = self.adb.shell(intent)
+                result = adb.shell(intent)
                 time.sleep(2)  # Tunggu intent diproses
                 
                 # Cek apakah muncul popup pemilihan SIM
-                if self.handle_sim_chooser(sim_index):
+                if handle_sim_chooser(adb, sim_index):
                     time.sleep(1)
                 
                 return True
@@ -437,10 +472,10 @@ def make_cellular_call(self, number, sim=0):
         
         # Method 2: Fallback ke intent biasa
         try:
-            self.adb.shell(f'am start -a android.intent.action.CALL -d tel:{number}')
+            adb.shell(f'am start -a android.intent.action.CALL -d tel:{number}')
             time.sleep(2)
             # Coba handle SIM chooser jika muncul
-            self.handle_sim_chooser(sim_index)
+            handle_sim_chooser(adb, sim_index)
             return True
         except Exception:
             pass
@@ -451,12 +486,12 @@ def make_cellular_call(self, number, sim=0):
         print(f"Cellular call error: {e}")
         return False
 
-def make_cellular_call_via_ussd(self, number, sim=0):
+def make_cellular_call_via_ussd(adb: AdbWrapper, number, sim=0):
     """
     Melakukan panggilan menggunakan USSD code (alternatif method)
     """
     try:
-        number = self.clean_phone_number(number)
+        number = clean_phone_number(number)
         sim_index = int(sim)
         
         # Encode number untuk USSD
@@ -469,11 +504,11 @@ def make_cellular_call_via_ussd(self, number, sim=0):
         
         for intent in intents:
             try:
-                self.adb.shell(intent)
+                adb.shell(intent)
                 time.sleep(3)
                 
                 # Handle SIM chooser
-                if self.handle_sim_chooser(sim_index):
+                if handle_sim_chooser(adb, sim_index):
                     time.sleep(2)
                 
                 return True
@@ -486,99 +521,79 @@ def make_cellular_call_via_ussd(self, number, sim=0):
         print(f"USSD call error: {e}")
         return False
 
-def handle_sim_chooser(self, sim_index):
+def handle_sim_chooser(adb, sim_index: int):
     """
-    Menangani popup pemilihan SIM jika muncul
-    Returns: True jika berhasil memilih SIM, False jika tidak
+    Menangani popup pemilihan SIM (Dialer)
+    sim_index: 0 = SIM 1, 1 = SIM 2
     """
     try:
-        # Tunggu sebentar untuk popup muncul
-        time.sleep(1.5)
-        
-        # Method 1: Menggunakan uiautomator2 jika available
-        if UIAUTOMATOR2_AVAILABLE:
-            try:
-                d = u2.connect()
-                
-                # Daftar teks yang mungkin untuk tombol SIM
-                sim_texts = [
-                    f"SIM {sim_index + 1}",
-                    f"SIM{sim_index + 1}",
-                    f"Kartu {sim_index + 1}",
-                    f"Kartu SIM {sim_index + 1}",
-                    f"Use SIM {sim_index + 1}",
-                    f"Pilih SIM {sim_index + 1}",
-                    f"Call with SIM {sim_index + 1}",
-                    f"Panggil dengan SIM {sim_index + 1}"
-                ]
-                
-                # Coba klik berdasarkan teks
-                for text in sim_texts:
-                    if d(text=text).exists:
-                        d(text=text).click()
-                        return True
-                
-                # Coba klik berdasarkan index jika ada multiple buttons
-                buttons = d(className="android.widget.Button")
-                if buttons.exists and buttons.count > sim_index:
-                    buttons[sim_index].click()
-                    return True
-                    
-            except Exception:
-                pass
-        
-        # Method 2: Menggunakan coordinate tapping berdasarkan hierarchy dump
-        xml_dump = self.adb.shell('uiautomator dump /sdcard/window_dump.xml && cat /sdcard/window_dump.xml')
-        if not xml_dump:
+        time.sleep(1.2)  # tunggu popup muncul
+
+        # Dump UI
+        adb.shell("uiautomator dump /sdcard/window_dump.xml")
+        time.sleep(0.3)
+        xml = adb.shell("cat /sdcard/window_dump.xml")
+
+        if "<?xml" not in xml:
             return False
-            
-        try:
-            import xml.etree.ElementTree as ET
-            root = ET.fromstring(xml_dump)
-            
-            sim_elements = []
-            for node in root.iter('node'):
-                text = node.attrib.get('text', '') + ' ' + node.attrib.get('content-desc', '')
-                bounds = node.attrib.get('bounds', '')
-                
-                # Cari elemen yang terkait SIM
-                sim_keywords = ['sim', 'kartu', 'call with', 'panggil dengan']
-                if any(keyword in text.lower() for keyword in sim_keywords) and bounds:
-                    sim_elements.append((text, bounds))
-            
-            # Jika ditemukan elemen SIM, pilih berdasarkan index
-            if len(sim_elements) > sim_index:
-                bounds = sim_elements[sim_index][1]
-                coords = re.findall(r'\d+', bounds)
-                if len(coords) >= 4:
-                    x1, y1, x2, y2 = map(int, coords[:4])
-                    cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
-                    self.adb.shell(f'input tap {cx} {cy}')
-                    return True
-                    
-        except Exception:
-            pass
-            
-        return False
-        
+
+        import xml.etree.ElementTree as ET
+        root = ET.fromstring(xml[xml.index("<?xml"):])
+
+        # ===============================
+        # 1️⃣ Pastikan ini popup pilih SIM
+        # ===============================
+        is_sim_dialog = False
+        for node in root.iter("node"):
+            if node.attrib.get("resource-id") == "com.android.dialer:id/alertTitle":
+                title = node.attrib.get("text", "").lower()
+                if "sim" in title:
+                    is_sim_dialog = True
+                    break
+
+        if not is_sim_dialog:
+            return False
+
+        # ==================================
+        # 2️⃣ Ambil semua row SIM (ListView)
+        # ==================================
+        sim_rows = []
+
+        for node in root.iter("node"):
+            # baris SIM adalah LinearLayout langsung di ListView
+            if node.attrib.get("class") == "android.widget.LinearLayout":
+                bounds = node.attrib.get("bounds")
+                if not bounds:
+                    continue
+
+                # Filter hanya row dalam area ListView
+                # (menghindari container lain)
+                parent = node.attrib.get("package") == "com.android.dialer"
+                if parent:
+                    sim_rows.append(bounds)
+
+        if len(sim_rows) < sim_index + 1:
+            return False
+
+        # ==========================
+        # 3️⃣ Tap berdasarkan index
+        # ==========================
+        bounds = sim_rows[sim_index]
+        nums = list(map(int, re.findall(r"\d+", bounds)))
+
+        if len(nums) != 4:
+            return False
+
+        x1, y1, x2, y2 = nums
+        cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
+
+        adb.shell(f"input tap {cx} {cy}")
+        return True
+
     except Exception as e:
-        print(f"SIM chooser handler error: {e}")
+        print("handle_sim_chooser error:", e)
         return False
 
-def clean_phone_number(self, number):
-    """
-    Membersihkan format nomor telepon
-    """
-    import re
-    cleaned = re.sub(r'[^\d+]', '', str(number))
-    
-    # Format Indonesia: ubah 0xxx menjadi +62xxx
-    if cleaned.startswith('0') and not cleaned.startswith('+'):
-        cleaned = '+62' + cleaned[1:]
-    elif not cleaned.startswith('+'):
-        cleaned = '+62' + cleaned
-        
-    return cleaned
 
 # --- SMSHandler simplified ---
 class SMSHandler:
@@ -608,7 +623,6 @@ class SMSHandler:
         return False
 
     def _clean_phone_number(self, number):
-        import re
         cleaned = re.sub(r'[^\d+]', '', str(number))
         if not cleaned.startswith('+'):
             if cleaned.startswith('0'):
@@ -657,8 +671,12 @@ class WSClient:
                 self.wa.audio_forwarder = self.audio_forwarder
         except Exception:
             self.audio_forwarder = None
-
-        # start heartbeat thread
+        
+        # Variabel untuk melacak status koneksi
+        self.ws_connected = False
+        self._connection_lock = threading.Lock()
+        
+        # start heartbeat thread (tapi tunggu koneksi dulu)
         self._hb_thread = threading.Thread(target=self._heartbeat_loop, daemon=True)
         self._hb_thread.start()
 
@@ -670,6 +688,8 @@ class WSClient:
 
     def stop(self):
         self._stop.set()
+        with self._connection_lock:
+            self.ws_connected = False
         try:
             if self.ws:
                 self.ws.close()
@@ -678,7 +698,7 @@ class WSClient:
 
     def send(self, data):
         try:
-        # Selalu sertakan serial jika belum ada
+            # Selalu sertakan serial jika belum ada
             try:
                 serial = get_serial(self.adb)
                 if isinstance(data, dict) and 'serial' not in data:
@@ -687,6 +707,13 @@ class WSClient:
                 pass
 
             payload = json.dumps(data)
+            
+
+            # Cek apakah WebSocket sudah terhubung
+            with self._connection_lock:
+                if not self.ws_connected:
+                    print(f"⏳ WebSocket not connected, skipping send for: {data.get('type', 'unknown')}")
+                    return
 
             # Pastikan koneksi WebSocket sudah siap
             if (
@@ -697,16 +724,25 @@ class WSClient:
             ):
                 try:
                     self.ws.send(payload)
-                    print(f"WS sent: {payload[:100]}...")  # log sebagian isi
+                    print(f"✅ WS sent: {data.get('type', 'unknown')}")  # log lebih ringkas
                 except Exception as e:
-                    print(f"⚠️ WS send failed: {e}")
+                    print(f"⚠️ WS send failed for {data.get('type', 'unknown')}: {e}")
+                    # Coba update status koneksi
+                    with self._connection_lock:
+                        self.ws_connected = False
             else:
-                print("⏳ WebSocket not ready, skipping send for:", data.get("type", "unknown"))
+                print(f"⏳ WebSocket socket not ready, skipping: {data.get('type', 'unknown')}")
+                with self._connection_lock:
+                    self.ws_connected = False
 
         except Exception as e:
-            print(f"❌ WS send exception: {e}")
+            print(f"❌ WS send exception for {data.get('type', 'unknown')}: {e}")
 
     def _on_open(self, ws):
+        print("✅ WebSocket connected")
+        with self._connection_lock:
+            self.ws_connected = True
+        
         device_info = get_device_info(self.adb)
         ip_local = get_local_ip(self.adb)
         serial = get_serial(self.adb)
@@ -725,6 +761,7 @@ class WSClient:
         req_id = msg.get("id")
         serialnum = msg.get("serialnum")
         serial = get_serial(self.adb)
+        # cek apakah sudah terdaftar 
 
         # If message targets this device by serial (or no serial provided), process actions
         if serialnum and serialnum != serial:
@@ -762,9 +799,8 @@ class WSClient:
 
         elif action == "send_ussd":
             code = data.get("code"); sim = data.get("sim", 0)
-            from bridgeservice import send_ussd_and_read as ussd  # local import to reuse function if present
             try:
-                res = ussd(self.adb, code, sim)
+                res = send_ussd_and_read(self.adb, code, sim)
             except Exception as e:
                 res = {"ok": False, "error": str(e)}
             self.send({"type": "send_ussd_result", "result": res, "id": req_id, "serial": serial})
@@ -784,13 +820,16 @@ class WSClient:
             number = data.get("number")
             app = data.get("app", "business")
             call_type = data.get("type","voice")
+            delay = data.get("delay")
             ok = False
             if self.wa:
                 self.wa.app = app
                 self.wa.package = "com.whatsapp.w4b" if app=="business" else "com.whatsapp"
                 self.wa.open_whatsapp_chat(number)
-                time.sleep(5)
+                time.sleep(2)
                 ok = self.wa.click_call(call_type)
+                time.sleep(delay)
+                self.wa.end_call
             self.send({"type":"wa_call_result","ok":ok,"id":req_id,"serial":serial})
 
         elif action == "audio_start":
@@ -811,13 +850,13 @@ class WSClient:
         elif action == "cellular_call":
             number = data.get("number")
             sim = data.get("sim", 0)  # 0 untuk SIM 1, 1 untuk SIM 2
-            ok = self.make_cellular_call(number, sim)
+            ok = make_cellular_call(self.adb, number, sim)
             self.send({"type":"cellular_call_result","ok":ok,"id":req_id,"serial":serial})
 
         elif action == "cellular_call_ussd":
             number = data.get("number")
             sim = data.get("sim", 0)
-            ok = self.make_cellular_call_via_ussd(number, sim)
+            ok = make_cellular_call_via_ussd(self.adb, number, sim)
             self.send({"type":"cellular_call_result","ok":ok,"id":req_id,"serial":serial})
 
         elif action == "update_scripts":
@@ -883,15 +922,19 @@ class WSClient:
             sys.exit(1)
 
     def _on_close(self, ws, code, reason):
-        print("WS closed", code, reason)
+        print(f"❌ WS closed: {code} - {reason}")
+        with self._connection_lock:
+            self.ws_connected = False
 
     def _on_error(self, ws, err):
-        print("WS error:", err)
+        print(f"⚠️ WS error: {err}")
+        with self._connection_lock:
+            self.ws_connected = False
 
     def _run(self):
         while not self._stop.is_set():
             try:
-                print("Connecting to", self.url)
+                print(f"🔗 Connecting to {self.url}")
                 self.ws = websocket.WebSocketApp(self.url,
                                                  on_message=self._on_message,
                                                  on_open=self._on_open,
@@ -899,27 +942,79 @@ class WSClient:
                                                  on_error=self._on_error)
                 self.ws.run_forever()
             except Exception as e:
-                print("WS run error:", e)
+                print(f"❌ WS run error: {e}")
+                with self._connection_lock:
+                    self.ws_connected = False
+            print("♻️ Reconnecting in 5 seconds...")
             time.sleep(5)
 
     def _heartbeat_loop(self):
+        """Loop heartbeat yang hanya mengirim jika WebSocket terhubung"""
+        heartbeat_count = 0
         while True:
             try:
+                # Tunggu sedikit untuk memastikan koneksi awal
+                if heartbeat_count < 3:
+                    time.sleep(10)  # Tunggu 10 detik untuk koneksi awal
+                else:
+                    time.sleep(HEARTBEAT_INTERVAL or 1800)
+                
+                # Cek apakah WebSocket terhubung
+                with self._connection_lock:
+                    if not self.ws_connected:
+                        print(f"💤 Heartbeat skipped - WebSocket not connected")
+                        heartbeat_count += 1
+                        continue
+                
                 serial = get_serial(self.adb)
-                payload = {"type":"heartbeat","serial":serial,"timestamp":datetime.now(timezone.utc).isoformat()}
+                payload = {
+                    "type": "heartbeat",
+                    "serial": serial,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "count": heartbeat_count
+                }
+                print(f"❤️ Sending heartbeat #{heartbeat_count}")
                 self.send(payload)
+                heartbeat_count += 1
+                
             except Exception as e:
-                print("heartbeat error:", e)
-            time.sleep(HEARTBEAT_INTERVAL or 1800)
+                print(f"💔 Heartbeat error: {e}")
+                time.sleep(60)  # Tunggu lebih singkat jika error
 
 def main():
+    print("🚀 Starting Bridge Service...")
+
+        # 🔹 Jalankan register dulu
+    from register import register_device
+    register_device()
+
+
+    adb = AdbWrapper()
+    # Ambil serial perangkat
+    serial = get_serial(adb)
+    if not serial:
+        print("❌ Tidak dapat membaca serial perangkat ADB!")
+        return
+
+    print(f"🔍 Mengecek status perangkat serial: {serial}")
+
+    # Cek ke server apakah serial aktif
+    is_active = check_device_status(serial)
+    
+    if not is_active:
+        print("⛔ Perangkat belum aktif atau belum terdaftar di server.")
+        return
+    else:
+        print("✅ Perangkat terdaftar & aktif di server. Melanjutkan...")
+
+    # Jalankan WS
+    #  client
     client = WSClient(WS_SERVER)
     client.start()
+
     try:
         while True:
             time.sleep(1)
     except KeyboardInterrupt:
+        print("\n🛑 Shutting down...")
         client.stop()
-
-if __name__ == "__main__":
-    main()
