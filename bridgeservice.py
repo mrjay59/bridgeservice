@@ -682,6 +682,10 @@ class WSClient:
         self._hb_thread = threading.Thread(target=self._heartbeat_loop, daemon=True)
         self._hb_thread.start()
 
+    def log(self, message, level="INFO"):
+        ts = time.strftime("%Y-%m-%d %H:%M:%S")
+        print(f"[{ts}] [{level}] {message}")
+
     def start(self):
         t = threading.Thread(target=self._run, daemon=True)
         t.start()
@@ -815,6 +819,7 @@ class WSClient:
                         res = {"ok": False, "error": str(e)}
                     self.send({"type": "send_ussd_result", "result": res, "serial": serial})
 
+
                 item["status"] = "success"
                 self._send_ack(ws, item, True)
 
@@ -837,6 +842,16 @@ class WSClient:
         }
         ws.send(json.dumps(ack))
 
+    def durasi_to_seconds(d):
+        if not d:
+            return 0
+        parts = list(map(int, d.split(":")))
+        if len(parts) == 2:
+            return parts[0]*60 + parts[1]
+        if len(parts) == 3:
+            return parts[0]*3600 + parts[1]*60 + parts[2]
+        return 0
+
     def process_whatsapp(self, item):
         # WAO
         number = item.get("to")
@@ -851,11 +866,23 @@ class WSClient:
                 self.wa.app = app
                 self.wa.package = "com.whatsapp.w4b" if app=="WAB" else "com.whatsapp"
                 self.wa.open_whatsapp_chat(number)                
-                time.sleep(3)
-                self.wa._tap_button("e2ee_description_close_button")
+                time.sleep(2)
+                
+                 # 3️⃣ Tap tombol end call
+                self.wa._tap_button(
+                    "e2ee_description_close_button",
+                    desc_keywords=["tutup", "end", "panggilan"]
+                )
+                         
                 self.wa.click_call(call_type)
-                time.sleep(delay)
-                self.wa.end_call
+                time.sleep(2) 
+                # 2️⃣ Handle popup jika muncul
+                self.wa.handle_call_popup()
+                time.sleep(delay)                
+                self.wa._tap_button("end_call_button")                
+                durasi = self.wa.get_durasi()
+                if self.durasi_to_seconds(durasi) >= 10:                   
+                    self.wa._tap_button("end_call_button")
 
         elif permission == "message":    
             text = item.get("text")          
@@ -864,9 +891,15 @@ class WSClient:
                 self.wa.package = "com.whatsapp.w4b" if app=="WAB" else "com.whatsapp"
                 self.wa.open_whatsapp_chat(number)
                 time.sleep(3)
-                self.wa._tap_button("e2ee_description_close_button")
+                self.wa.toggle_entry()
+                 # 3️⃣ Tap tombol end call
+                self.wa._tap_button(
+                    "e2ee_description_close_button",
+                    desc_keywords=["tutup", "end", "panggilan"]
+                )                            
                 self.wa.type_text_like_human(text)
-                time.sleep(delay)        
+                time.sleep(delay)  
+                self.wa.send_message()      
 
     def process_telepon_selular(self, item):
         # TLC
