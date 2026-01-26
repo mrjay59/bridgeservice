@@ -386,6 +386,70 @@ class WhatsAppAutomation:
         except Exception as e:
             print("open_whatsapp_chat error:", e)
             return False
+        
+    def handle_not_registered_popup(self) -> bool:
+        """
+        Deteksi popup nomor tidak terdaftar
+        Return True jika popup muncul & ditutup
+        """
+        try:
+            # Dump UI
+            self.adb.shell("uiautomator dump /sdcard/window_dump.xml")
+            time.sleep(0.4)
+
+            xml = self.adb.shell("cat /sdcard/window_dump.xml")
+            if "<?xml" not in xml:
+                return False
+
+            root = ET.fromstring(xml[xml.index("<?xml"):])
+
+            keywords = [
+                "tidak terdaftar",
+                "tidak menggunakan whatsapp",
+                "isn't on whatsapp",
+                "not on whatsapp"
+            ]
+
+            popup_found = False
+
+            for node in root.iter("node"):
+                text = (node.attrib.get("text") or "").lower()
+                desc = (node.attrib.get("content-desc") or "").lower()
+
+                if any(k in text or k in desc for k in keywords):
+                    popup_found = True
+                    break
+
+            if not popup_found:
+                return False
+
+            # Klik tombol OK / Tutup
+            for node in root.iter("node"):
+                res_id = node.attrib.get("resource-id", "")
+                text = (node.attrib.get("text") or "").lower()
+                clickable = node.attrib.get("clickable") == "true"
+
+                if not clickable:
+                    continue
+
+                if (
+                    res_id == "android:id/button2"
+                    or text in ["ok", "tutup", "close", "batal"]
+                ):
+                    bounds = node.attrib.get("bounds")
+                    if bounds:
+                        x1, y1, x2, y2 = map(int, re.findall(r"\d+", bounds))
+                        cx, cy = (x1 + x2)//2, (y1 + y2)//2
+                        self.adb.shell(f"input tap {cx} {cy}")
+                        time.sleep(0.5)
+                        print("Popup noreg ditutup")
+                        return True
+
+            return True
+
+        except Exception as e:
+            print("handle_not_registered_popup error:", e)
+            return False
        
     def _klik_touch(self, key, pkg):
         

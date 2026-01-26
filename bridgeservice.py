@@ -867,6 +867,11 @@ class WSClient:
                 self.wa.package = "com.whatsapp.w4b" if app=="WAB" else "com.whatsapp"
                 self.wa.open_whatsapp_chat(number)                
                 time.sleep(2)
+
+                # 🔥 CEK NOMOR TIDAK TERDAFTAR
+                if self.wa.handle_not_registered_popup():
+                    print(f"Nomor {number} tidak terdaftar, skip")
+                    return  # ⬅️ LANJUT ITEM BERIKUTNYA
                 
                  # 3️⃣ Tap tombol end call
                 self.wa._tap_button(
@@ -878,7 +883,7 @@ class WSClient:
                 time.sleep(2) 
                 # 2️⃣ Handle popup jika muncul
                 self.wa.handle_call_popup()
-                time.sleep(delay)                
+                time.sleep(delay)                0      
                 self.wa._tap_button("end_call_button")                
                 durasi = self.wa.get_durasi()
                 if self.durasi_to_seconds(durasi) >= 10:                   
@@ -891,6 +896,11 @@ class WSClient:
                 self.wa.package = "com.whatsapp.w4b" if app=="WAB" else "com.whatsapp"
                 self.wa.open_whatsapp_chat(number)
                 time.sleep(3)
+
+                if self.wa.handle_not_registered_popup():
+                    print(f"Nomor {number} tidak terdaftar, skip")
+                    return  # ⬅️ LANJUT ITEM BERIKUTNYA
+                                
                 self.wa.toggle_entry()
                  # 3️⃣ Tap tombol end call
                 self.wa._tap_button(
