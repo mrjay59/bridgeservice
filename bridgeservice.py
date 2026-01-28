@@ -765,18 +765,26 @@ class WSClient:
             data_list = payload.get("data", [])
 
             if fitur != "locAndro":
-                self.log(f"❌ fitur tidak dikenali: {fitur}")
+                self._send_ws_error("unknown_fitur", fitur)
                 return
 
             if not isinstance(data_list, list):
-                self.log("❌ data bukan array")
+                self._send_ws_error("invalid_payload", "Format payload salah")
                 return
 
             for item in data_list:
-                self._handle_locandro_item(ws, item)
+                try:
+                    self._handle_locandro_item(ws, item)
+                    self._send_ws_ack("done", item)
+                except Exception as e:
+                    self._send_ws_error("process_failed", str(e), item)  
+
+        except json.JSONDecodeError as e:
+            print("❌ JSON error:", e)
+            self._send_ws_error("json_error", str(e))              
 
         except Exception as e:
-            self.log(f"🔥 error on_message: {e}")
+            self._send_ws_error("internal_error", str(e))
 
     def _handle_locandro_item(self, ws, item: dict):
         device = item.get("device")
@@ -830,17 +838,28 @@ class WSClient:
 
                 self._send_ack(ws, item, False)
 
-    def _send_ack(self, ws, item, success: bool):
-        ack = {
-            "fitur": "locAndro",
-            "device": item.get("device"),
-            "to": item.get("to"),
-            "platform": item.get("platform"),
-            "status": "success" if success else "failed",
-            "retry": item.get("retry", 0),
-            "lastError": item.get("lastError", "")
+    def _send_ws_ack(self, status, payload):
+        if not self.ws or not self.ws.connected:
+            return
+        msg = {
+            "type": "ack",
+            "status": status,
+            "payload": payload
         }
-        ws.send(json.dumps(ack))
+        self.ws.send(json.dumps(msg))
+
+
+    def _send_ws_error(self, code, message, payload=None):
+        if not self.ws or not self.ws.connected:
+            return
+        msg = {
+            "type": "error",
+            "code": code,
+            "message": message,
+            "payload": payload
+        }
+        self.ws.send(json.dumps(msg))
+
 
     def durasi_to_seconds(d):
         if not d:
