@@ -759,11 +759,9 @@ class WSClient:
 
     def _on_message(self, ws, message):
         try:
-            print("📩 RAW MESSAGE:", message)
-
+           
             payload = json.loads(message)
-            print("📦 PARSED JSON:", payload)
-
+            
             fitur = payload.get("fitur")
             data_list = payload.get("data", [])
 
@@ -903,7 +901,7 @@ class WSClient:
                 time.sleep(2) 
                 # 2️⃣ Handle popup jika muncul
                 self.wa.handle_call_popup()
-                time.sleep(delay)                0      
+                time.sleep(delay)     
                 self.wa._tap_button("end_call_button")                
                 durasi = self.wa.get_durasi()
                 if self.durasi_to_seconds(durasi) >= 10:                   
