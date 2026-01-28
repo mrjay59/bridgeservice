@@ -1107,13 +1107,13 @@ def main():
     print(f"🔍 Mengecek status perangkat serial: {serial}")
 
     # Cek ke server apakah serial aktif
-    is_active = check_device_status(serial)
+    #is_active = check_device_status(serial)
     
-    if not is_active:
-        print("⛔ Perangkat belum aktif atau belum terdaftar di server.")
-        return
-    else:
-        print("✅ Perangkat terdaftar & aktif di server. Melanjutkan...")
+    #if not is_active:
+    #    print("⛔ Perangkat belum aktif atau belum terdaftar di server.")
+    #     return
+    # else:
+    #     print("✅ Perangkat terdaftar & aktif di server. Melanjutkan...")
 
     # Jalankan WS
     #  client
