@@ -759,7 +759,10 @@ class WSClient:
 
     def _on_message(self, ws, message):
         try:
+            print("📩 RAW MESSAGE:", message)
+
             payload = json.loads(message)
+            print("📦 PARSED JSON:", payload)
 
             fitur = payload.get("fitur")
             data_list = payload.get("data", [])
@@ -848,7 +851,6 @@ class WSClient:
         }
         self.ws.send(json.dumps(msg))
 
-
     def _send_ws_error(self, code, message, payload=None):
         if not self.ws or not self.ws.connected:
             return
@@ -859,7 +861,6 @@ class WSClient:
             "payload": payload
         }
         self.ws.send(json.dumps(msg))
-
 
     def durasi_to_seconds(d):
         if not d:
@@ -1107,13 +1108,13 @@ def main():
     print(f"🔍 Mengecek status perangkat serial: {serial}")
 
     # Cek ke server apakah serial aktif
-    #is_active = check_device_status(serial)
+    is_active = check_device_status(serial)
     
-    #if not is_active:
-    #    print("⛔ Perangkat belum aktif atau belum terdaftar di server.")
-    #     return
-    # else:
-    #     print("✅ Perangkat terdaftar & aktif di server. Melanjutkan...")
+    if not is_active:
+        print("⛔ Perangkat belum aktif atau belum terdaftar di server.")
+        return
+    else:
+        print("✅ Perangkat terdaftar & aktif di server. Melanjutkan...")
 
     # Jalankan WS
     #  client
