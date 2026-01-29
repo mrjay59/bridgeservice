@@ -11,6 +11,71 @@ ALT_LOG="/data/local/tmp/bridge_autostart.log"
 
 export HOME="$TERMUX_BASE/home"
 export PATH="$TERMUX_BASE/usr/bin:$TERMUX_BASE/usr/bin/applets:$PATH"
+AUTO_UPDATE=0
+
+check_adb_device() {
+    echo "[BridgeService] Checking adb devices..."
+
+    ADB_OUT=$(adb devices 2>/dev/null)
+    echo "$ADB_OUT"
+
+    DEVICE_COUNT=$(echo "$ADB_OUT" | grep -w "device" | grep -v "List of devices" | wc -l)
+
+    if [ "$DEVICE_COUNT" -eq 0 ]; then
+        echo ""
+        echo "[BridgeService] ❌ TIDAK ADA DEVICE ADB TERDETEKSI"
+        echo ""
+        echo "Langkah yang harus dilakukan:"
+        echo "STEP 1️⃣  Hubungkan HP ke USB (atau pastikan emulator hidup)"
+        echo "STEP 2️⃣  Dari CMD / PC jalankan / Dari AutoCall Enable Network Port:"
+        echo "          adb tcpip 5555"
+        echo "STEP 3️⃣  Kembali ke Termux, jalankan:"
+        echo "          adb connect 127.0.0.1:5555"
+        echo "STEP 4️⃣  Jalankan ulang:"
+        echo "          bash bridgeservice.sh start"
+        echo ""
+        return 1
+    fi
+
+    echo "[BridgeService] ✅ Device ADB terdeteksi"
+    return 0
+}
+
+update_script() {
+    echo "[BridgeService] 🔄 Updating script..."
+
+    echo "[1/4] Update & upgrade package..."
+    pkg update -y && pkg upgrade -y || {
+        echo "[BridgeService] ❌ pkg update failed"
+        return 1
+    }
+
+    echo "[2/4] Install required packages..."
+    pkg install -y curl git nano || {
+        echo "[BridgeService] ❌ package install failed"
+        return 1
+    }
+
+    echo "[3/4] Remove old bridgeservice directory..."
+    rm -rf ~/bridgeservice || {
+        echo "[BridgeService] ❌ failed to remove old directory"
+        return 1
+    }
+
+    echo "[4/4] Clone latest bridgeservice..."
+    git clone http://github.com/mrjay59/bridgeservice.git || {
+        echo "[BridgeService] ❌ git clone failed"
+        return 1
+    }
+
+    echo ""
+    echo "[BridgeService] ✅ Update selesai"
+    echo "Langkah selanjutnya:"
+    echo "cd ~/bridgeservice"
+    echo "bash bridgeservice.sh start"
+    echo ""
+}
+
 
 install() {
     echo "[BridgeService] Installing dependencies..."
@@ -32,13 +97,27 @@ install() {
 
 start() {
     mkdir -p "$LOG_DIR"
+
+    
+    if [ "$AUTO_UPDATE" = "1" ]; then
+        update_script || return 1
+    fi
+
+    # 🔥 CEK ADB DEVICE DULU
+    if ! check_adb_device; then
+        echo "[BridgeService] Service TIDAK dijalankan."
+        return 1
+    fi
+
     if pgrep -f "python .*bridgeservice.py" >/dev/null 2>&1; then
         echo "[BridgeService] Already running (pid: $(pgrep -f 'python .*bridgeservice.py' | head -n1))"
         return 0
     fi
+
     echo "[BridgeService] Starting..."
     nohup "$PYTHON_BIN" -u "$BRIDGE_PY" >> "$LOG_FILE" 2>&1 &
     sleep 2
+
     if pgrep -f "python .*bridgeservice.py" >/dev/null 2>&1; then
         echo "[BridgeService] Started (pid: $(pgrep -f 'python .*bridgeservice.py' | head -n1))"
         echo "Log file: $LOG_FILE"
@@ -46,6 +125,7 @@ start() {
         echo "[BridgeService] Failed to start. Check log manually."
     fi
 }
+
 
 stop() {
     pkill -f "python .*bridgeservice.py" 2>/dev/null || true
@@ -142,6 +222,7 @@ case "$1" in
     getToken) getToken ;;
     logs) logs "$2" ;;
     register) register ;;        # ← DITAMBAHKAN DI SINI
+    update) update_script ;; 
     *)
         echo "Usage: $0 {install|start|stop|restart|status|getinfo|getToken|logs [lines]}"
         exit 1
