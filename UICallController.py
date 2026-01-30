@@ -7,7 +7,7 @@ class UICallController:
     def __init__(self, adb):
         self.adb = adb
         self.dump_path = "/sdcard/uicall.xml"
-
+  
     # ==================================================
     # INTERNAL HELPERS
     # ==================================================

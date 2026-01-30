@@ -94,7 +94,7 @@ install() {
     fi
     register
 }
-
+  
 start() {
     mkdir -p "$LOG_DIR"
 

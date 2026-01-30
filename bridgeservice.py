@@ -168,7 +168,7 @@ def get_imei(adb: AdbWrapper, slot=0):
         return imei or None
     except Exception:
         return None
-
+  
 def get_sim_info(adb: 'AdbWrapper', slot=0):
     """
     Mengambil informasi nomor SIM dari device via ADB.

@@ -8,7 +8,7 @@ LOG_DIR="$BRIDGE_HOME/logs"
 REQ_FILE="$BRIDGE_HOME/requirements.txt"
 
 mkdir -p "$LOG_DIR"
-
+  
 echo "[BridgeSetup] Updating package list..."
 pkg update -y
 

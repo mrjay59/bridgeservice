@@ -15,7 +15,7 @@ class CallAudioForwarder:
         self.thread = None
         self.running = False
         self._stop_event = threading.Event()
-
+  
     def start(self):
         if self.running:
             return

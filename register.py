@@ -57,7 +57,7 @@ def register_device():
 
     print("📡 Mengirim data registrasi ke server...")
     print(json.dumps(profile, indent=2, ensure_ascii=False))
-
+  
     # GANTI URL JIKA PERLU
     url = "https://mrjay59.com/api/cpost/device/register"
 

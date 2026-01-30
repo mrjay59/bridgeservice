@@ -336,7 +336,7 @@ class WhatsAppAutomation:
             if not tapped:
                 print("Failed tap end call")
                 return False
-
+ 
             time.sleep(1.2)
             new_status = (self.get_call_status() or "").lower()
 
