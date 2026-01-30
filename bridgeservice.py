@@ -656,15 +656,17 @@ class WSClient:
         self.adb = AdbWrapper()
         self.sms = SMSHandler(self, self.adb)
      
-        self.ui_call = UICallController(self.adb)
+        self.ui_call = None
         self._stop = threading.Event()
         self.wa = None
 
         
         try:
             self.wa = WhatsAppAutomation(self.adb, app="business")
+            self.ui_call = UICallController(self.adb)
         except Exception:
             self.wa = None
+            self.ui_call = None
 
         use_root_audio = os.environ.get("USE_ROOT_AUDIO", "false").lower() == "true"
         try:
