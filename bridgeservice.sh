@@ -180,7 +180,6 @@ getinfo() {
     echo "serial  : $serial"
 }
 
-
 getToken() {
     local log=""
     if [ -f "$LOG_FILE" ]; then log="$LOG_FILE"

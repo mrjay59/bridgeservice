@@ -61,7 +61,7 @@ def check_device_status(serial):
     try:
         r = requests.post(url, json=payload, timeout=5)
         if r.status_code == 200:
-            #print("Server response:", r.text)
+            print("Server response:", r.text)
             data = r.json()
             return data.get("active")
         else:
