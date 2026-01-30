@@ -152,24 +152,34 @@ status() {
 }
 
 getinfo() {
-    if [ -f "$LOG_FILE" ]; then
-        echo "[BridgeService] Device Info:"
-        # Cari baris terakhir yang mengandung bridge_hello
-        local info=$(grep -a "'type': 'bridge_hello'" "$LOG_FILE" | tail -n 1)
-        if [ -n "$info" ]; then
-            # Bersihkan prefix log
-            info=$(echo "$info" | sed "s/.*Received message without action: //")
-            # Ubah kutip tunggal ke ganda supaya bisa diproses grep
-            info=$(echo "$info" | sed "s/'/\"/g")
-            # Tampilkan beberapa field penting
-            echo "$info" | grep -oE '"(brand|model|android|serial|ip_local)"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/"//g' | sed 's/: /= /'
-        else
-            echo "  No bridge_hello data found in logs."
-        fi
+    echo "[BridgeService] Device Info:"
+
+    # Cek adb
+    if command -v adb >/dev/null 2>&1 && adb get-state 1>/dev/null 2>&1; then
+        brand=$(adb shell getprop ro.product.brand | tr -d '\r')
+        model=$(adb shell getprop ro.product.model | tr -d '\r')
+        android=$(adb shell getprop ro.build.version.release | tr -d '\r')
+        serial=$(adb shell getprop ro.serialno | tr -d '\r')
     else
-        echo "[BridgeService] Log file not found: $LOG_FILE"
+        # Fallback tanpa adb (langsung di Termux)
+        brand=$(getprop ro.product.brand)
+        model=$(getprop ro.product.model)
+        android=$(getprop ro.build.version.release)
+        serial=$(getprop ro.serialno)
     fi
+
+    # Validasi hasil
+    [ -z "$brand" ] && brand="unknown"
+    [ -z "$model" ] && model="unknown"
+    [ -z "$android" ] && android="unknown"
+    [ -z "$serial" ] && serial="unknown"
+
+    echo "brand   : $brand"
+    echo "model   : $model"
+    echo "android : $android"
+    echo "serial  : $serial"
 }
+
 
 getToken() {
     local log=""
