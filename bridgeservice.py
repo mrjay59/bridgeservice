@@ -63,6 +63,7 @@ def check_device_status(serial):
         if r.status_code == 200:
             print("Server response:", r.text)
             data = r.json()
+            msg = data.get("msg")
             return data.get("active")
         else:
             print("❌ Server error:", r.status_code)
@@ -842,25 +843,35 @@ class WSClient:
                 self._send_ack(ws, item, False)
 
     def _send_ws_ack(self, status, payload):
-        if not self.ws or not self.ws.connected:
-            return
+        with self._connection_lock:
+            if not self.ws_connected:
+                return
         msg = {
             "type": "ack",
             "status": status,
             "payload": payload
         }
-        self.ws.send(json.dumps(msg))
+        try:
+            self.ws.send(json.dumps(msg))
+        except Exception:
+            pass
+
 
     def _send_ws_error(self, code, message, payload=None):
-        if not self.ws or not self.ws.connected:
-            return
+        with self._connection_lock:
+            if not self.ws_connected:
+                return
         msg = {
             "type": "error",
             "code": code,
             "message": message,
             "payload": payload
         }
-        self.ws.send(json.dumps(msg))
+        try:
+            self.ws.send(json.dumps(msg))
+        except Exception:
+            pass
+
 
     def durasi_to_seconds(d):
         if not d:

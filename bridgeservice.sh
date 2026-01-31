@@ -63,7 +63,7 @@ update_script() {
     }
 
     echo "[4/4] Clone latest bridgeservice..."
-    git clone http://github.com/mrjay59/bridgeservice.git || {
+    git pull http://github.com/mrjay59/bridgeservice.git || {
         echo "[BridgeService] ❌ git clone failed"
         return 1
     }
