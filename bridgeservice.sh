@@ -44,37 +44,27 @@ check_adb_device() {
 update_script() {
     echo "[BridgeService] 🔄 Updating script..."
 
-    echo "[1/4] Update & upgrade package..."
-    pkg update -y && pkg upgrade -y || {
-        echo "[BridgeService] ❌ pkg update failed"
+    cd "$BASE_DIR" || {
+        echo "[ERROR] Cannot access $BASE_DIR"
         return 1
     }
 
-    echo "[2/4] Install required packages..."
-    pkg install -y curl git nano || {
-        echo "[BridgeService] ❌ package install failed"
-        return 1
-    }
+    if [ -d ".git" ]; then
+        echo "[BridgeService] Pulling latest changes..."
+        git fetch --all
+        git reset --hard origin/main
+        git pull origin main
+    else
+        echo "[BridgeService] Git repo not found, cloning fresh copy..."
+        cd ..
+        rm -rf bridgeservice
+        git clone https://github.com/mrjay59/bridgeservice.git
+        cd bridgeservice || return 1
+    fi
 
-    echo "[3/4] Remove old bridgeservice directory..."
-    rm -rf ~/bridgeservice || {
-        echo "[BridgeService] ❌ failed to remove old directory"
-        return 1
-    }
-
-    echo "[4/4] Clone latest bridgeservice..."
-    git clone http://github.com/mrjay59/bridgeservice.git || {
-        echo "[BridgeService] ❌ git clone failed"
-        return 1
-    }
-
-    echo ""
-    echo "[BridgeService] ✅ Update selesai"
-    echo "Langkah selanjutnya:"
-    echo "cd ~/bridgeservice"
-    echo "bash bridgeservice.sh start"
-    echo ""
+    echo "[BridgeService] ✅ Update completed"
 }
+
 
 
 install() {
