@@ -47,7 +47,7 @@ update_script() {
     cd "$BASE_DIR" || {
         echo "[ERROR] Cannot access $BASE_DIR"
         return 1
-    }
+    }  
 
     if [ -d ".git" ]; then
         echo "[BridgeService] Pulling latest changes..."
