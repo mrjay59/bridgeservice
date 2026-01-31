@@ -8,10 +8,10 @@ BRIDGE_PY="$BRIDGE_HOME/bridgeservice.py"
 LOG_DIR="$BRIDGE_HOME/logs"
 LOG_FILE="$LOG_DIR/service.log"
 ALT_LOG="/data/local/tmp/bridge_autostart.log"
-
+BASE_DIR="$(cd "$(dirname "$0")" && pwd)"
 export HOME="$TERMUX_BASE/home"
 export PATH="$TERMUX_BASE/usr/bin:$TERMUX_BASE/usr/bin/applets:$PATH"
-AUTO_UPDATE=0
+AUTO_UPDATE=1
 
 check_adb_device() {
     echo "[BridgeService] Checking adb devices..."
@@ -45,7 +45,7 @@ update_script() {
     echo "[BridgeService] 🔄 Updating script..."
 
     cd "$BASE_DIR" || {
-        echo "[ERROR] Cannot access $BASE_DIR"
+        echo "[ERROR] Cannot access BASE_DIR: $BASE_DIR"
         return 1
     }
 
