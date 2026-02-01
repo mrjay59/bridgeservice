@@ -1,6 +1,7 @@
 #!/data/data/com.termux/files/usr/bin/bash
-# setup_bridgeservice.sh - FULL setup BridgeService for Termux with logging
+# setup_bridgeservice.sh - STABLE FINAL for Termux
 
+set -e
 set -o pipefail
 
 TERMUX_BASE="/data/data/com.termux/files"
@@ -18,12 +19,11 @@ echo "[BridgeSetup] START $(date)"
 echo "======================================"
 
 echo "[BridgeSetup] Updating packages..."
-pkg update -y || echo "[WARN] pkg update failed"
+pkg update -y
 
-echo "[BridgeSetup] Installing base packages..."
+echo "[BridgeSetup] Installing base system packages..."
 pkg install -y \
   python \
-  python-pip \
   git \
   wget \
   curl \
@@ -32,56 +32,58 @@ pkg install -y \
   clang \
   libxml2 \
   libxslt \
-  zip \
-  unzip \
   busybox \
   procps \
   android-tools \
-  termux-api || echo "[ERROR] base package install failed"
+  termux-api \
+  python-pillow \
+  python-psutil
 
-echo "[BridgeSetup] Upgrading pip toolchain..."
-python -m pip install --upgrade pip setuptools wheel || echo "[ERROR] pip upgrade failed"
+echo "[BridgeSetup] Python version:"
+python --version
+pip --version
 
-echo "[BridgeSetup] Installing Python dependencies..."
-python -m pip install --upgrade \
+echo "[BridgeSetup] Installing Python modules (pip-safe only)..."
+pip install --no-cache-dir \
   requests \
   websocket-client \
-  pillow \
-  psutil \
   adbutils \
   uiautomator2 \
   aiohttp \
   websockets \
   certifi \
-  xmltodict || echo "[ERROR] pip module install failed"
+  xmltodict
 
 if [ -f "$REQ_FILE" ]; then
   echo "[BridgeSetup] Installing from requirements.txt..."
-  python -m pip install -r "$REQ_FILE" || echo "[ERROR] requirements.txt install failed"
-else
-  echo "[BridgeSetup] No requirements.txt found"
+  pip install --no-cache-dir -r "$REQ_FILE"
 fi
 
 echo "[BridgeSetup] Verifying Python modules..."
-python - << 'EOF'
+python << 'EOF'
 mods = [
-    ("requests", "requests"),
-    ("websocket", "websocket-client"),
-    ("PIL", "pillow"),
-    ("adbutils", "adbutils"),
-    ("uiautomator2", "uiautomator2"),
+    "requests",
+    "websocket",
+    "PIL",
+    "adbutils",
+    "uiautomator2",
 ]
-for m, pkg in mods:
+failed = False
+for m in mods:
     try:
         __import__(m)
-        print(f"✔ {pkg} OK")
+        print(f"✔ {m} OK")
     except Exception as e:
-        print(f"❌ {pkg} FAILED:", e)
+        failed = True
+        print(f"❌ {m} FAILED:", e)
+
+if failed:
+    raise SystemExit("❌ Python dependency verification failed")
 EOF
 
 echo "[BridgeSetup] Verifying system tools..."
-command -v adb && adb version | head -n 1 || echo "❌ adb not found"
-command -v termux-sms-list || echo "⚠️ termux-api not available"
+command -v adb && adb version | head -n 1
+command -v termux-sms-list
 
 echo "======================================"
 echo "[BridgeSetup] DONE $(date)"
