@@ -76,7 +76,7 @@ install() {
     fi
 
     # Jalankan setup terpisah
-    local setup_script="$BRIDGE_HOME/setup_bridge.sh"
+    local setup_script="$BRIDGE_HOME/setup_bridgeservice.sh"
     if [ -f "$setup_script" ]; then
         bash "$setup_script"
     else
