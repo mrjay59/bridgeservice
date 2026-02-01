@@ -76,11 +76,11 @@ install() {
     fi
 
     # Jalankan setup terpisah
-    local setup_script="$BRIDGE_HOME/setup_bridgeservice.sh"
+    local setup_script="$BRIDGE_HOME/setup_bridge.sh"
     if [ -f "$setup_script" ]; then
         bash "$setup_script"
     else
-        echo "[BridgeService] setup_bridgeservice.sh not found in $BRIDGE_HOME"
+        echo "[BridgeService] setup_bridge.sh not found in $BRIDGE_HOME"
         echo "Please copy it there before running install."
     fi
     register
