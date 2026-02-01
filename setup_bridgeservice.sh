@@ -1,7 +1,6 @@
 #!/data/data/com.termux/files/usr/bin/bash
-# setup_bridgeservice.sh - STABLE FINAL for Termux
+# setup_bridgeservice.sh - STABLE FINAL (Termux SAFE)
 
-set -e
 set -o pipefail
 
 TERMUX_BASE="/data/data/com.termux/files"
@@ -11,7 +10,6 @@ SETUP_LOG="$LOG_DIR/setup.log"
 REQ_FILE="$BRIDGE_HOME/requirements.txt"
 
 mkdir -p "$LOG_DIR"
-
 exec > >(tee -a "$SETUP_LOG") 2>&1
 
 echo "======================================"
@@ -19,7 +17,7 @@ echo "[BridgeSetup] START $(date)"
 echo "======================================"
 
 echo "[BridgeSetup] Updating packages..."
-pkg update -y
+pkg update -y || true
 
 echo "[BridgeSetup] Installing base system packages..."
 pkg install -y \
@@ -36,54 +34,65 @@ pkg install -y \
   procps \
   android-tools \
   termux-api \
-  python-pillow \
-  python-psutil
+  python-pillow || {
+    echo "❌ Base package install failed"
+    exit 1
+}
 
-echo "[BridgeSetup] Python version:"
+echo "[BridgeSetup] Python info:"
 python --version
 pip --version
 
-echo "[BridgeSetup] Installing Python modules (pip-safe only)..."
+echo "[BridgeSetup] Installing Python modules via pip..."
 pip install --no-cache-dir \
   requests \
   websocket-client \
+  psutil \
   adbutils \
   uiautomator2 \
   aiohttp \
   websockets \
   certifi \
-  xmltodict
+  xmltodict || {
+    echo "❌ pip install failed"
+    exit 1
+}
 
 if [ -f "$REQ_FILE" ]; then
   echo "[BridgeSetup] Installing from requirements.txt..."
-  pip install --no-cache-dir -r "$REQ_FILE"
+  pip install --no-cache-dir -r "$REQ_FILE" || {
+    echo "❌ requirements.txt install failed"
+    exit 1
+  }
 fi
 
 echo "[BridgeSetup] Verifying Python modules..."
 python << 'EOF'
-mods = [
-    "requests",
-    "websocket",
-    "PIL",
-    "adbutils",
-    "uiautomator2",
-]
+modules = {
+    "requests": "requests",
+    "websocket": "websocket-client",
+    "PIL": "pillow",
+    "psutil": "psutil",
+    "adbutils": "adbutils",
+    "uiautomator2": "uiautomator2"
+}
+
 failed = False
-for m in mods:
+for mod, name in modules.items():
     try:
-        __import__(m)
-        print(f"✔ {m} OK")
+        __import__(mod)
+        print(f"✔ {name} OK")
     except Exception as e:
         failed = True
-        print(f"❌ {m} FAILED:", e)
+        print(f"❌ {name} FAILED:", e)
 
 if failed:
-    raise SystemExit("❌ Python dependency verification failed")
+    raise SystemExit("❌ Dependency verification failed")
 EOF
 
 echo "[BridgeSetup] Verifying system tools..."
-command -v adb && adb version | head -n 1
-command -v termux-sms-list
+command -v adb && adb version | head -n 1 || exit 1
+command -v termux-sms-list || echo "⚠️ termux-api not available"
 
 echo "======================================"
 echo "[BridgeSetup] DONE $(date)"
