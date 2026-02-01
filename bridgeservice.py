@@ -141,15 +141,32 @@ def get_local_ip(adb: AdbWrapper):
     except Exception:
         pass
     return "0.0.0.0"
-
+    
 def get_device_info(adb: AdbWrapper):
     try:
         brand = adb.shell("getprop ro.product.manufacturer").strip()
         model = adb.shell("getprop ro.product.model").strip()
         android = adb.shell("getprop ro.build.version.release").strip()
-        return {"brand": brand, "model": model, "android": android}
+
+        # device name seperti di About phone
+        device_name = adb.shell("settings get global device_name").strip()
+        if not device_name or device_name == "null":
+            device_name = adb.shell("settings get secure device_name").strip()
+
+        # fallback terakhir
+        if not device_name or device_name == "null":
+            device_name = adb.shell("getprop ro.product.device").strip()
+
+        return {
+            "brand": brand,
+            "model": model,
+            "android": android,
+            "device_name": device_name
+        }
     except Exception:
         return {}
+
+
 
 def get_serial(adb: AdbWrapper):
     try:
