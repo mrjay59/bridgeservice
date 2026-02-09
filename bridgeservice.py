@@ -144,31 +144,63 @@ def get_local_ip(adb: AdbWrapper):
     
 def get_device_info(adb: AdbWrapper):
     try:
-        brand = adb.shell("getprop ro.product.manufacturer").strip()
-        model = adb.shell("getprop ro.product.model").strip()
-        android = adb.shell("getprop ro.build.version.release").strip()
+        def safe(cmd):
+            try:
+                return adb.shell(cmd).strip()
+            except:
+                return ""
 
-        # device name seperti di About phone
-        device_name = adb.shell("settings get global device_name").strip()
-        if not device_name or device_name == "null":
-            device_name = adb.shell("settings get secure device_name").strip()
+        iplocal = get_local_ip(adb)
 
-        # fallback terakhir
+        brand = safe("getprop ro.product.manufacturer")
+        model = safe("getprop ro.product.model")
+        android = safe("getprop ro.build.version.release")
+        sdk = safe("getprop ro.build.version.sdk")
+
+        # Device name (About phone)
+        device_name = safe("settings get global device_name")
         if not device_name or device_name == "null":
-            device_name = adb.shell("getprop ro.product.device").strip()
+            device_name = safe("settings get secure device_name")
+        if not device_name or device_name == "null":
+            device_name = safe("getprop ro.product.device")
+
+        # Identitas unik
+        serial = safe("getprop ro.serialno")
+        if not serial or serial == "unknown":
+            serial = safe("settings get secure android_id")
+
+        # Hardware info
+        abi = safe("getprop ro.product.cpu.abi")
+        hardware = safe("getprop ro.hardware")
+        fingerprint = safe("getprop ro.build.fingerprint")
+
+        # Root check
+        root_status = "rooted" if safe("which su") else "not_rooted"
+
+        # Network
+        network = safe("getprop gsm.network.type")
 
         return {
             "brand": brand,
             "model": model,
             "android": android,
-            "device_name": device_name
+            "sdk": sdk,
+            "device_name": device_name,
+            "serial": serial,
+            "abi": abi,
+            "hardware": hardware,
+            "fingerprint": fingerprint,
+            "root": root_status,
+            "network": network,
+            "iplocal": iplocal
         }
-    except Exception:
+
+    except Exception as e:
+        print("get_device_info error:", e)
         return {}
 
 
-
-def get_serial(adb: AdbWrapper):
+def get_serial(adb: AdbWrapper):    
     try:
         s = adb.shell("getprop ro.serialno").strip()
         if not s:

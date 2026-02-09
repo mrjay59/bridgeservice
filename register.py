@@ -55,8 +55,8 @@ def register_device():
         "sims": [sim1, sim2]
     }
 
-    print("📡 Mengirim data registrasi ke server...")
-    print(json.dumps(profile, indent=2, ensure_ascii=False))
+    #print("📡 Mengirim data registrasi ke server...")
+    #print(json.dumps(profile, indent=2, ensure_ascii=False))
   
     # GANTI URL JIKA PERLU
     url = "https://mrjay59.com/api/cpost/device/register"
