@@ -192,7 +192,8 @@ def get_device_info(adb: AdbWrapper):
             "fingerprint": fingerprint,
             "root": root_status,
             "network": network,
-            "iplocal": iplocal
+            "iplocal": iplocal,
+            "apk": {}
         }
 
     except Exception as e:
