@@ -50,7 +50,7 @@ try:
 except Exception as e:
     print('Warning: local modules import issue:', e)
 
-WS_SERVER = os.environ.get("BRIDGE_WS", "wss://s14223.blr1.piesocket.com/v3/1?api_key=WVXN94EfJrQO7fSpSwwKJZgxbavdLdKLZBPLLlQR&notify_self=1")
+WS_SERVER = os.environ.get("BRIDGE_WS", "wss://157.66.15.122:8000/ws")
 HEARTBEAT_INTERVAL = int(os.environ.get("HEARTBEAT_INTERVAL", 1800))  # 30 minutes default
 POLL_SMS_INTERVAL = 3
 
