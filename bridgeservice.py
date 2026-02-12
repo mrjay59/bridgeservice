@@ -808,7 +808,7 @@ class WSClient:
         sim1 = {"imei": get_imei(self.adb, 0), **get_sim_info(self.adb, 0)}
         sim2 = {"imei": get_imei(self.adb, 1), **get_sim_info(self.adb, 1)}
         profile = {"platform":"termux","device":device_info,"serial":serial,"ip_local":ip_local}
-        self.send({"type":"bridge_hello","id":str(uuid.uuid4()),"info":profile,"serial":serial})
+        self.send({"type":"bridge_hello", "message":"device online update data","id":str(uuid.uuid4()),"info":profile,"serial":serial})
 
     def _on_message(self, ws, message):
         try:
@@ -898,6 +898,7 @@ class WSClient:
                 return
         msg = {
             "type": "ack",
+            "message": "reply ack to client ",
             "status": status,
             "payload": payload
         }
