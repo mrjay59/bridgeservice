@@ -41,7 +41,7 @@ try:
     ADBUTILS_AVAILABLE = True
 except Exception:
     ADBUTILS_AVAILABLE = False
-
+ 
 # Local modules
 try:
     from WhatsAppAutomation import WhatsAppAutomation
