@@ -51,7 +51,7 @@ except Exception as e:
     print('Warning: local modules import issue:', e)
 
 WS_SERVER = os.environ.get("BRIDGE_WS", "wss://ws.autocall.my.id/ws")
-HEARTBEAT_INTERVAL = int(os.environ.get("HEARTBEAT_INTERVAL", 1800))  # 30 minutes default
+HEARTBEAT_INTERVAL = int(os.environ.get("HEARTBEAT_INTERVAL", 1200))  # 20 minutes default
 POLL_SMS_INTERVAL = 3
 
 def check_device_status(serial):
@@ -873,6 +873,9 @@ class WSClient:
                 elif platform == "CMD":
                     self.process_cmd(item)
 
+                elif platform == "SS":
+                    self.process_ssb(item)
+
                 elif platform == "USSD":
                     code = item.get("text"); sim = item.get("sim", 0)
                     try:
@@ -907,7 +910,6 @@ class WSClient:
         except Exception:
             pass
 
-
     def _send_ws_error(self, code, message, payload=None):
         with self._connection_lock:
             if not self.ws_connected:
@@ -922,7 +924,6 @@ class WSClient:
             self.ws.send(json.dumps(msg))
         except Exception:
             pass
-
 
     def durasi_to_seconds(d):
         if not d:
@@ -1034,6 +1035,16 @@ class WSClient:
         out = ""
         try:
           out = run_local(cmd)
+        except Exception as e:
+          out = str(e)
+          self.send({"type": "adb_shell_result", "out": out, "serial": serial})
+
+    def process_ssb(self, item):
+        serial = get_serial(self.adb)
+        cmd = item.get("text", "")
+        out = ""
+        try:
+          out = capture_screenshot_base64(self.adb)
         except Exception as e:
           out = str(e)
           self.send({"type": "adb_shell_result", "out": out, "serial": serial})
@@ -1180,7 +1191,8 @@ def main():
 
     # Jalankan WS
     #  client
-    client = WSClient(WS_SERVER)
+    ws_url = f"wss://ws.autocall.my.id/ws?serial={serial}"
+    client = WSClient(ws_url)
     client.start()
 
     try:
