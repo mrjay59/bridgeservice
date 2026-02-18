@@ -89,31 +89,43 @@ install() {
 start() {
     mkdir -p "$LOG_DIR"
 
-    
+    echo "==================================================" >> "$LOG_FILE"
+    echo "[BridgeService] $(date '+%Y-%m-%d %H:%M:%S') - START COMMAND RECEIVED" >> "$LOG_FILE"
+
     if [ "$AUTO_UPDATE" = "1" ]; then
-        update_script || return 1
+        echo "[BridgeService] Auto update enabled" >> "$LOG_FILE"
+        update_script >> "$LOG_FILE" 2>&1 || return 1
     fi
 
-    # 🔥 CEK ADB DEVICE DULU
-    if ! check_adb_device; then
-        echo "[BridgeService] Service TIDAK dijalankan."
+    if ! check_adb_device >> "$LOG_FILE" 2>&1; then
+        echo "[BridgeService] ADB device check failed" >> "$LOG_FILE"
         return 1
     fi
 
     if pgrep -f "python .*bridgeservice.py" >/dev/null 2>&1; then
-        echo "[BridgeService] Already running (pid: $(pgrep -f 'python .*bridgeservice.py' | head -n1))"
+        PID=$(pgrep -f 'python .*bridgeservice.py' | head -n1)
+        echo "[BridgeService] Already running (pid: $PID)" >> "$LOG_FILE"
+        echo "[BridgeService] Already running (pid: $PID)"
         return 0
     fi
 
-    echo "[BridgeService] Starting..."
+    echo "[BridgeService] Starting Python service..." >> "$LOG_FILE"
+
+    # Tambahan: force unbuffered + environment flag
+    export PYTHONUNBUFFERED=1
+
     nohup "$PYTHON_BIN" -u "$BRIDGE_PY" >> "$LOG_FILE" 2>&1 &
-    sleep 2
+
+    sleep 3
 
     if pgrep -f "python .*bridgeservice.py" >/dev/null 2>&1; then
-        echo "[BridgeService] Started (pid: $(pgrep -f 'python .*bridgeservice.py' | head -n1))"
+        PID=$(pgrep -f 'python .*bridgeservice.py' | head -n1)
+        echo "[BridgeService] Started successfully (pid: $PID)" >> "$LOG_FILE"
+        echo "[BridgeService] Started (pid: $PID)"
         echo "Log file: $LOG_FILE"
     else
-        echo "[BridgeService] Failed to start. Check log manually."
+        echo "[BridgeService] FAILED TO START" >> "$LOG_FILE"
+        echo "[BridgeService] Failed to start. Check log."
     fi
 }
 
@@ -212,6 +224,17 @@ logs() {
     tail -n "$n" "$log"
 }
 
+check_ws_health() {
+    if [ ! -f "$LOG_FILE" ]; then
+        return
+    fi
+
+    if tail -n 100 "$LOG_FILE" | grep -E "WS closed|Connection lost|Traceback|error" > /dev/null; then
+        echo "[BridgeService] $(date '+%Y-%m-%d %H:%M:%S') - WS ISSUE DETECTED, RESTARTING..." >> "$LOG_FILE"
+        restart
+    fi
+}
+
 case "$1" in
     install) install ;;
     start) start ;;
@@ -223,8 +246,16 @@ case "$1" in
     logs) logs "$2" ;;
     register) register ;;        # ← DITAMBAHKAN DI SINI
     update) update_script ;; 
+    watchdog)
+    echo "[BridgeService] Watchdog mode started" >> "$LOG_FILE"
+    while true
+    do
+        check_ws_health
+        sleep 1800
+    done
+    ;;
     *)
-        echo "Usage: $0 {install|start|stop|restart|status|getinfo|getToken|logs [lines]}"
+        echo "Usage: $0 {install|start|stop|restart|status|getinfo|getToken|logs [lines]|watchdog|update}"
         exit 1
         ;;
 esac

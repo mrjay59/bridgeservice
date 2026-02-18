@@ -55,7 +55,7 @@ HEARTBEAT_INTERVAL = int(os.environ.get("HEARTBEAT_INTERVAL", 1200))  # 20 minut
 POLL_SMS_INTERVAL = 3
 
 def check_device_status(serial):
-    url = "https://mrjay59.com/api/cpost/device/state"   # GANTI DENGAN URL SERVER KAMU
+    url = "https://mrjay59.com/api/cpost/device/state" 
     payload = {"serial": serial,"tipe": "cekstate"}
 
     try:
@@ -141,6 +141,29 @@ def get_local_ip(adb: AdbWrapper):
     except Exception:
         pass
     return "0.0.0.0"
+
+def get_root_info():
+    try:
+        euid = os.geteuid()
+        if euid == 0:
+            try:
+                user = subprocess.check_output(["whoami"]).decode().strip()
+            except:
+                user = "root"
+            return {
+                "status": True,
+                "user": user
+            }
+        else:
+            return {
+                "status": False,
+                "user": None
+            }
+    except:
+        return {
+            "status": False,
+            "user": None
+        }
     
 def get_device_info(adb: AdbWrapper):
     try:
@@ -175,7 +198,7 @@ def get_device_info(adb: AdbWrapper):
         fingerprint = safe("getprop ro.build.fingerprint")
 
         # Root check
-        root_status = "rooted" if safe("which su") else "not_rooted"
+        root_status = get_root_info()
 
         # Network
         network = safe("getprop gsm.network.type")
@@ -644,6 +667,11 @@ def handle_sim_chooser(adb, sim_index: int):
         print("handle_sim_chooser error:", e)
         return False
 
+def log_print(msg, level="INFO"):
+    ts = time.strftime("%Y-%m-%d %H:%M:%S")
+    line = f"[{ts}] [{level}] {msg}"
+    print(line, flush=True)
+
 # --- SMSHandler simplified ---
 class SMSHandler:
     def __init__(self, wsclient, adb: AdbWrapper):
@@ -685,20 +713,36 @@ class SMSHandler:
             try:
                 msgs = self.list_sms()
                 new = []
+
                 for m in msgs:
-                    mid = m.get('id') or m.get('date') or json.dumps(m)
+                    mid = m.get('_id') or m.get('id') or m.get('date')
                     if mid not in self.last_seen_ids:
-                        new.append(m); self.last_seen_ids.add(mid)
+                        new.append(m)
+                        self.last_seen_ids.add(mid)
+
                 for m in reversed(new):
                     try:
-                        self.ws.send({"type":"sms_received","data":m,"serial":get_serial(self.adb)})
-                    except Exception:
-                        pass
+                        sms_payload = dict(m)
+                        sms_payload["read"] = True
+                        sms_payload["forwarded"] = True
+
+                        self.ws.send({
+                            "type": "sms_received",
+                            "data": sms_payload,
+                            "serial": get_serial(self.adb)
+                        })
+
+                    except Exception as e:
+                        log_print(f"SMS send error: {e}", "ERROR")
+
                 if len(self.last_seen_ids) > 2000:
                     self.last_seen_ids = set(list(self.last_seen_ids)[-1000:])
+
             except Exception as e:
-                print("SMSHandler poll error:", e)
+                log_print(f"SMSHandler poll error: {e}", "ERROR")
+
             time.sleep(POLL_SMS_INTERVAL)
+
 
 class WSClient:
     def __init__(self, url):
@@ -710,7 +754,7 @@ class WSClient:
         self.ui_call = None
         self._stop = threading.Event()
         self.wa = None
-
+        self.reconnect_attempt = 0
         
         try:
             self.wa = WhatsAppAutomation(self.adb, app="business")
@@ -798,7 +842,8 @@ class WSClient:
             print(f"❌ WS send exception for {data.get('type', 'unknown')}: {e}")
 
     def _on_open(self, ws):
-        print("✅ WebSocket connected")
+        log_print("WebSocket connected")
+        self.reconnect_attempt = 0
         with self._connection_lock:
             self.ws_connected = True
         
@@ -1104,31 +1149,36 @@ class WSClient:
             print("Restart failed:", e)
             sys.exit(1)
 
-    def _on_close(self, ws, code, reason):
-        print(f"❌ WS closed: {code} - {reason}")
+    def _on_close(self, ws, code, reason):        
+        log_print(f"❌ WS closed: {code} - {reason}", "ERROR")
         with self._connection_lock:
             self.ws_connected = False
 
     def _on_error(self, ws, err):
-        print(f"⚠️ WS error: {err}")
+        log_print(f"WS run error: {e}", "ERROR")
         with self._connection_lock:
             self.ws_connected = False
 
     def _run(self):
         while not self._stop.is_set():
             try:
-                print(f"🔗 Connecting to {self.url}")
-                self.ws = websocket.WebSocketApp(self.url,
-                                                 on_message=self._on_message,
-                                                 on_open=self._on_open,
-                                                 on_close=self._on_close,
-                                                 on_error=self._on_error)
-                self.ws.run_forever()
+                self.reconnect_attempt += 1
+                log_print(f"Connecting to {self.url} (attempt {self.reconnect_attempt})")
+
+                self.ws = websocket.WebSocketApp(
+                    self.url,
+                    on_message=self._on_message,
+                    on_open=self._on_open,
+                    on_close=self._on_close,
+                    on_error=self._on_error
+                )
+
+                self.ws.run_forever(ping_interval=30, ping_timeout=10)
+
             except Exception as e:
-                print(f"❌ WS run error: {e}")
-                with self._connection_lock:
-                    self.ws_connected = False
-            print("♻️ Reconnecting in 5 seconds...")
+                log_print(f"WS run error: {e}", "ERROR")
+
+            log_print("Reconnecting in 5 seconds...", "WARN")
             time.sleep(5)
 
     def _heartbeat_loop(self):
@@ -1150,9 +1200,10 @@ class WSClient:
                         continue
                 
                 serial = get_serial(self.adb)
+                device_info = get_device_info(self.adb)
                 payload = {
                     "type": "heartbeat",
-                    "serial": serial,
+                    "device_info": device_info,
                     "timestamp": datetime.now(timezone.utc).isoformat(),
                     "count": heartbeat_count
                 }
@@ -1191,7 +1242,7 @@ def main():
 
     # Jalankan WS
     #  client
-    ws_url = f"wss://ws.autocall.my.id/ws?serial={serial}"
+    ws_url = f"wss://ws.autocall.my.id/ws?username={serial}"
     client = WSClient(ws_url)
     client.start()
 
