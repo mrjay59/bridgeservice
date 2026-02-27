@@ -180,6 +180,25 @@ def get_device_info(adb: AdbWrapper):
         # Network
         network = safe("getprop gsm.network.type")
 
+        # SIM / Card Info
+        imei_list = get_all_imei(adb)
+        number_list = get_all_numbers(adb)
+        operator_list = get_operator(adb)
+        signal_list = get_signal_strength(adb)
+        iccid_list = get_all_iccid(adb)
+        sim_state_list = get_sim_state(adb)
+
+        cardinfo = {
+            "network_type": network,
+            "operator": operator_list,
+            "signal_dbm": signal_list,
+            "iccid": iccid_list,
+            "imei": imei_list,
+            "number": number_list,
+            "sim_state": sim_state_list,
+            "dual_sim": len(sim_state_list) > 1
+        }
+
         return {
             "brand": brand,
             "model": model,
@@ -191,15 +210,75 @@ def get_device_info(adb: AdbWrapper):
             "hardware": hardware,
             "fingerprint": fingerprint,
             "root": root_status,
-            "network": network,
             "iplocal": iplocal,
-            "apk": {}
+            "cardinfo": cardinfo
         }
 
     except Exception as e:
         print("get_device_info error:", e)
         return {}
+    
+def get_sim_state(adb):
+    try:
+        out = adb.shell("getprop gsm.sim.state").strip()
+        return [x.strip() for x in out.split(',') if x]
+    except:
+        return []
+        
+def get_iccid(adb, slot=0):
+    try:
+        out = adb.shell(f"service call iphonesubinfo {11+slot}") or ""
+        matches = re.findall(r"'(.*?)'", out)
+        iccid = ''.join(matches).replace('.', '').strip()
+        if iccid and len(iccid) > 10:
+            return iccid
+    except:
+        pass
+    return None
 
+def get_all_iccid(adb):
+    iccids = []
+    for slot in range(2):
+        val = get_iccid(adb, slot)
+        if val and val not in iccids:
+            iccids.append(val)
+    return iccids
+    
+def get_signal_strength(adb):
+    try:
+        out = adb.shell("dumpsys telephony.registry | grep -i 'mSignalStrength'") or ""
+        match = re.search(r"dbm=(-?\d+)", out)
+        if match:
+            return [int(match.group(1))]
+    except:
+        pass
+    return []
+    
+def get_operator(adb):
+    try:
+        out = adb.shell("getprop gsm.operator.alpha").strip()
+        if not out:
+            out = adb.shell("getprop gsm.sim.operator.alpha").strip()
+        return [x for x in out.split(',') if x]
+    except:
+        return []
+    
+def get_all_imei(adb):
+    imeis = []
+    for slot in range(2):  # support dual sim
+        imei = get_imei(adb, slot)
+        if imei and imei not in imeis:
+            imeis.append(imei)
+    return imeis
+
+def get_all_numbers(adb):
+    numbers = []
+    for slot in range(2):
+        sim = get_sim_info(adb, slot)
+        num = sim.get("number")
+        if num and num not in numbers:
+            numbers.append(num)
+    return numbers
 
 def get_serial(adb: AdbWrapper):    
     try:
