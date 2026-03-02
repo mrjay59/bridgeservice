@@ -311,8 +311,7 @@ def get_serial(adb: AdbWrapper):
         return s or None
     except Exception:
         return None
-    
-# Minimal SIM/IMEI helpers (keeps previous logic brief)
+
 def get_imei(adb: AdbWrapper, slot=0):
     try:
         out = adb.shell(f"service call iphonesubinfo {1+slot}") or ""
