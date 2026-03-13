@@ -1330,7 +1330,7 @@ def main():
         print("❌ username tidak ditemukan di server")
         return
 
-    if not is_active:
+    if not is_active: 
         print("⛔ Perangkat belum aktif atau belum terdaftar di server.")
         return
     else:
