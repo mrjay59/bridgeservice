@@ -62,9 +62,8 @@ def check_device_status(serial):
         r = requests.post(url, json=payload, timeout=5)
         if r.status_code == 200:
             print("Server response:", r.text)
-            data = r.json()
-            msg = data.get("msg")
-            return data.get("active")
+            data = r.json()        
+            return data
         else:
             print("❌ Server error:", r.status_code)
             return False
@@ -931,7 +930,7 @@ class WSClient:
         sim1 = {"imei": get_imei(self.adb, 0), **get_sim_info(self.adb, 0)}
         sim2 = {"imei": get_imei(self.adb, 1), **get_sim_info(self.adb, 1)}
         profile = {"platform":"termux","device":device_info,"serial":serial,"ip_local":ip_local}
-        self.send({"type":"bridge_hello", "message":"device online update data","id":str(uuid.uuid4()),"info":profile,"serial":serial})
+        self.send({"type":"heartbeat", "message":"device online update data","id":str(uuid.uuid4()),"info":profile,"serial":serial})
 
     def _on_message(self, ws, message):
         try:
@@ -939,6 +938,7 @@ class WSClient:
             payload = json.loads(message)
             
             fitur = payload.get("fitur")
+            username = payload.get("username")
             data_list = payload.get("data", [])
 
             if fitur != "locAndro":
@@ -952,9 +952,9 @@ class WSClient:
             for item in data_list:
                 try:
                     self._handle_locandro_item(ws, item)
-                    self._send_ws_ack("done", item)
+                    self._send_ws_ack("done", item, username)
                 except Exception as e:
-                    self._send_ws_error("process_failed", str(e), item)  
+                    self._send_ws_error("process_failed", str(e), item, username)  
 
         except json.JSONDecodeError as e:
             print("❌ JSON error:", e)
@@ -1018,22 +1018,28 @@ class WSClient:
 
                 self._send_ack(ws, item, False)
 
-    def _send_ws_ack(self, status, payload):
+    def _send_ws_ack(self, status, payload, username=None):
         with self._connection_lock:
             if not self.ws_connected:
                 return
+
         msg = {
             "type": "ack",
-            "message": "reply ack to client ",
+            "message": "reply ack to client",
             "status": status,
             "payload": payload
         }
+
+        # 🔥 tambahkan request id supaya server tahu siapa pengirimnya
+        if username:
+            msg["to"] = username
+
         try:
             self.ws.send(json.dumps(msg))
-        except Exception:
-            pass
+        except Exception as e:
+            print("WS ACK send error:", e)
 
-    def _send_ws_error(self, code, message, payload=None):
+    def _send_ws_error(self, code, message, payload=None, username=None):
         with self._connection_lock:
             if not self.ws_connected:
                 return
@@ -1043,6 +1049,11 @@ class WSClient:
             "message": message,
             "payload": payload
         }
+
+           # 🔥 tambahkan request id supaya server tahu siapa pengirimnya
+        if username:
+            msg["to"] = username
+
         try:
             self.ws.send(json.dumps(msg))
         except Exception:
@@ -1310,8 +1321,15 @@ def main():
     print(f"🔍 Mengecek status perangkat serial: {serial}")
 
     # Cek ke server apakah serial aktif
-    is_active = check_device_status(serial)
+    respon = check_device_status(serial)
     
+    username = respon.get("username")
+    is_active = respon.get("active")
+
+    if not username:
+        print("❌ username tidak ditemukan di server")
+        return
+
     if not is_active:
         print("⛔ Perangkat belum aktif atau belum terdaftar di server.")
         return
@@ -1320,7 +1338,7 @@ def main():
 
     # Jalankan WS
     #  client
-    ws_url = f"wss://ws.autocall.my.id/ws?username={serial}"
+    ws_url = f"wss://ws.autocall.my.id/ws?username={username}"
     client = WSClient(ws_url)
     client.start()
 
