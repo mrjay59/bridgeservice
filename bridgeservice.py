@@ -933,35 +933,74 @@ class WSClient:
         self.send({"type":"heartbeat", "message":"device online update data","id":str(uuid.uuid4()),"info":profile,"serial":serial})
 
     def _on_message(self, ws, message):
+
         try:
-           
+
             payload = json.loads(message)
-            
+
+            msg_type = payload.get("type")
+            sender = payload.get("from")      # siapa yang kirim
+            target = payload.get("to")        # username tujuan
+            request_id = payload.get("request_id")
+
+            # hanya proses command
+            if msg_type != "command":
+                return
+
             fitur = payload.get("fitur")
-            username = payload.get("username")
             data_list = payload.get("data", [])
 
             if fitur != "locAndro":
-                self._send_ws_error("unknown_fitur", fitur)
+                self._send_ws_error("unknown_fitur", fitur, sender, request_id)
                 return
 
             if not isinstance(data_list, list):
-                self._send_ws_error("invalid_payload", "Format payload salah")
+                self._send_ws_error("invalid_payload", "data harus array", sender, request_id)
                 return
 
             for item in data_list:
+
                 try:
+
+                    # jalankan task android
                     self._handle_locandro_item(ws, item)
-                    self._send_ws_ack("done", item, username)
+
+                    # kirim ACK sukses
+                    self._send_ws_ack(
+                        status="done",
+                        payload=item,
+                        to_user=sender,
+                        request_id=request_id
+                    )
+
                 except Exception as e:
-                    self._send_ws_error("process_failed", str(e), item, username)  
+
+                    self._send_ws_error(
+                        "process_failed",
+                        str(e),
+                        sender,
+                        request_id
+                    )
 
         except json.JSONDecodeError as e:
+
             print("❌ JSON error:", e)
-            self._send_ws_error("json_error", str(e))              
+
+            self._send_ws_error(
+                "json_error",
+                str(e),
+                None,
+                None
+            )
 
         except Exception as e:
-            self._send_ws_error("internal_error", str(e))
+
+            self._send_ws_error(
+                "internal_error",
+                str(e),
+                None,
+                None
+            )
 
     def _handle_locandro_item(self, ws, item: dict):
         device = item.get("device")
@@ -1018,45 +1057,41 @@ class WSClient:
 
                 self._send_ack(ws, item, False)
 
-    def _send_ws_ack(self, status, payload, username=None):
+    def _send_ws_ack(self, status, payload, to_user, request_id):
+
         with self._connection_lock:
             if not self.ws_connected:
                 return
 
         msg = {
             "type": "ack",
-            "message": "reply ack to client",
+            "to": to_user,
             "status": status,
+            "request_id": request_id,
             "payload": payload
         }
-
-        # 🔥 tambahkan request id supaya server tahu siapa pengirimnya
-        if username:
-            msg["to"] = username
 
         try:
             self.ws.send(json.dumps(msg))
         except Exception as e:
             print("WS ACK send error:", e)
 
-    def _send_ws_error(self, code, message, payload=None, username=None):
-        with self._connection_lock:
-            if not self.ws_connected:
-                return
+    def _send_ws_error(self, error, message, to_user=None, request_id=None):
+
         msg = {
-            "type": "error",
-            "code": code,
+            "type": "ack",
+            "status": "error",
+            "error": error,
             "message": message,
-            "payload": payload
+            "request_id": request_id
         }
 
-           # 🔥 tambahkan request id supaya server tahu siapa pengirimnya
-        if username:
-            msg["to"] = username
+        if to_user:
+            msg["to"] = to_user
 
         try:
             self.ws.send(json.dumps(msg))
-        except Exception:
+        except:
             pass
 
     def durasi_to_seconds(d):
