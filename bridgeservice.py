@@ -963,16 +963,9 @@ class WSClient:
                 try:
 
                     # jalankan task android
-                    self._handle_locandro_item(ws, item)
+                    self._handle_locandro_item(ws, item, sender, request_id)
 
-                    # kirim ACK sukses
-                    self._send_ws_ack(
-                        status="done",
-                        payload=item,
-                        to_user=sender,
-                        request_id=request_id
-                    )
-
+                    
                 except Exception as e:
 
                     self._send_ws_error(
@@ -1002,7 +995,7 @@ class WSClient:
                 None
             )
 
-    def _handle_locandro_item(self, ws, item: dict):
+    def _handle_locandro_item(self, ws, item: dict, to_user, request_id):
         device = item.get("device")
         connection = item.get("connection", "").upper()
         platform = item.get("platform", "").upper()
@@ -1021,34 +1014,47 @@ class WSClient:
 
                 # ROUTING PLATFORM
                 if platform == "WAO" or platform == "WAB":
-                    self.process_whatsapp(item)               
+                    res = self.process_whatsapp(item)
 
                 elif platform == "TLC":
-                    self.process_telepon_selular(item)
+                    res = self.process_telepon_selular(item)
 
                 elif platform == "SMS":
-                    self.process_sms(item)
+                    res = self.process_sms(item)
 
                 elif platform == "ADB":
-                    self.process_adbshell(item)
+                    res = self.process_adbshell(item)
 
                 elif platform == "CMD":
-                    self.process_cmd(item)
+                    res = self.process_cmd(item)
 
                 elif platform == "SS":
-                    self.process_ssb(item)
+                    res = self.process_ssb(item)
 
                 elif platform == "USSD":
-                    code = item.get("text"); sim = item.get("sim", 0)
+                    code = item.get("text")
+                    sim = item.get("sim", 0)
                     try:
                         res = send_ussd_and_read(self.adb, code, sim)
                     except Exception as e:
-                        res = {"ok": False, "error": str(e)}
-                    self.send({"type": "send_ussd_result", "result": res, "serial": serial})
+                        res = {"ok": False, "msg": str(e)}
+
+                else:
+                    res = {"ok": False, "msg": "unknown platform"}
 
 
-                item["status"] = "success"
-                self._send_ack(ws, item, True)
+                status = "success" if res.get("ok", True) else "failed"
+
+                self._send_ws_ack(
+                    status,
+                    {
+                        "device": device,
+                        "platform": platform,
+                        "result": res
+                    },
+                    to_user,
+                    request_id
+                )        
 
             except Exception as e:
                 item["status"] = "failed"
@@ -1111,6 +1117,9 @@ class WSClient:
         app = item.get("platform", "WAB")
         delay = item.get("delay")
 
+        if not self.wa:
+           return {"ok": False, "msg": "WhatsAppAutomation not ready"}
+
         if permission == "call":            
             call_type = item.get("type","voice")
                    
@@ -1122,8 +1131,7 @@ class WSClient:
 
                 # 🔥 CEK NOMOR TIDAK TERDAFTAR
                 if self.wa.handle_not_registered_popup():
-                    print(f"Nomor {number} tidak terdaftar, skip")
-                    return  # ⬅️ LANJUT ITEM BERIKUTNYA
+                    return {"ok": False, "msg": f"Nomor {number} tidak terdaftar, skip"}                    
                 
                  # 3️⃣ Tap tombol end call
                 self.wa._tap_button(
@@ -1140,6 +1148,8 @@ class WSClient:
                 durasi = self.wa.get_durasi()
                 if self.durasi_to_seconds(durasi) >= 10:                   
                     self.wa._tap_button("end_call_button")
+                    return {"ok": True, "msg": "Panggilan WhatsApp berhasil", "duration": durasi}
+                
 
         elif permission == "message":    
             text = item.get("text")          
@@ -1150,8 +1160,7 @@ class WSClient:
                 time.sleep(3)
 
                 if self.wa.handle_not_registered_popup():
-                    print(f"Nomor {number} tidak terdaftar, skip")
-                    return  # ⬅️ LANJUT ITEM BERIKUTNYA
+                    return {"ok": False, "msg": f"Nomor {number} tidak terdaftar, skip"}                      
                                 
                 self.wa.toggle_entry()
                  # 3️⃣ Tap tombol end call
@@ -1161,7 +1170,8 @@ class WSClient:
                 )                            
                 self.wa.type_text_like_human(text)
                 time.sleep(delay)  
-                self.wa.send_message()      
+                self.wa.send_message() 
+                return {"ok": True, "msg": "Pesan WhatsApp berhasil"}     
 
     def process_telepon_selular(self, item):
         # TLC
@@ -1178,6 +1188,7 @@ class WSClient:
             if duration >= "00:10":
                 print("⛔ Ending call...")
                 self.ui_call.end_call()
+                return {"ok": True, "msg": "Telepon selular berhasil", "duration": duration}
 
     def process_sms(self, item):           
         permission = item.get("permission")       
@@ -1187,6 +1198,7 @@ class WSClient:
             n = item.get("to"); t = item.get("text"); s = item.get("sim", 0)
             self.sms.send_sms(n, t, s)
             time.sleep(delay)
+            return {"ok": True, "msg": "SMS berhasil"}
 
     def process_adbshell(self, item):
         serial = get_serial(self.adb)
@@ -1194,19 +1206,21 @@ class WSClient:
         out = ""
         try:
           out = self.adb.shell(cmd)
+          return {"ok": True, "msg": out}
         except Exception as e:
           out = str(e)
-          self.send({"type": "adb_shell_result", "out": out, "serial": serial})
-
+          return {"ok": False, "msg": out}
+        
     def process_cmd(self, item):
         serial = get_serial(self.adb)
         cmd = item.get("text", "")
         out = ""
         try:
           out = run_local(cmd)
+          return {"ok": True, "msg": out}
         except Exception as e:
           out = str(e)
-          self.send({"type": "adb_shell_result", "out": out, "serial": serial})
+          return {"ok": False, "msg": out}
 
     def process_ssb(self, item):
         serial = get_serial(self.adb)
@@ -1214,9 +1228,10 @@ class WSClient:
         out = ""
         try:
           out = capture_screenshot_base64(self.adb)
+          return {"ok": True, "msg": out}
         except Exception as e:
           out = str(e)
-          self.send({"type": "adb_shell_result", "out": out, "serial": serial})
+          return {"ok": False, "msg": out}
    
     def update_python_scripts(self, data):
         try:
