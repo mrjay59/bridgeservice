@@ -1065,12 +1065,11 @@ class WSClient:
 
     def _send_ws_ack(self, status, payload, to_user, request_id):
 
-        with self._connection_lock:
-            if not self.ws_connected:
-                return
+        serial = get_serial(self.adb)
 
         msg = {
             "type": "ack",
+            "from": serial,
             "to": to_user,
             "status": status,
             "request_id": request_id,
@@ -1079,6 +1078,7 @@ class WSClient:
 
         try:
             self.ws.send(json.dumps(msg))
+            print("ACK SENT:", msg)
         except Exception as e:
             print("WS ACK send error:", e)
 
