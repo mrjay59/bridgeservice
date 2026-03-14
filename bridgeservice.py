@@ -1147,14 +1147,24 @@ class WSClient:
         except:
             pass
 
-    def durasi_to_seconds(d):
+    def durasi_to_seconds(self, d):
+
         if not d:
             return 0
-        parts = list(map(int, d.split(":")))
+
+        d = d.replace(".", ":")
+
+        parts = [int(x) for x in d.split(":") if x.isdigit()]
+
+        if len(parts) == 1:
+            return parts[0]
+
         if len(parts) == 2:
             return parts[0]*60 + parts[1]
+
         if len(parts) == 3:
             return parts[0]*3600 + parts[1]*60 + parts[2]
+
         return 0
 
     def process_whatsapp(self, item):
@@ -1198,7 +1208,7 @@ class WSClient:
 
                 durasi = self.wa.get_durasi()
                 get_call_status = self.wa.get_call_status()
-                if self.durasi_to_seconds(self,durasi) >= 10:
+                if self.durasi_to_seconds(durasi) >= 10:
                     return {"ok": True, "msg": "Panggilan WhatsApp berhasil", "duration": durasi, "call_status": get_call_status}
                 else:
                     return {"ok": False, "msg": "Durasi panggilan terlalu singkat", "duration": durasi, "call_status": get_call_status}
