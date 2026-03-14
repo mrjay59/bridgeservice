@@ -953,6 +953,9 @@ class WSClient:
             target = payload.get("to")        # username tujuan
             request_id = payload.get("request_id")
 
+            print("FROM:", sender)
+            print("REQUEST_ID:", request_id)
+
             # hanya proses command
             if msg_type != "command":
                 return
@@ -1062,17 +1065,24 @@ class WSClient:
                 )        
 
             except Exception as e:
-                item["status"] = "failed"
-                item["retry"] = item.get("retry", 0) + 1
-                item["lastError"] = str(e)
-
+                 self._send_ws_ack(
+                    "failed",
+                    {"error": str(e)},
+                    to_user,
+                    request_id
+                )
+    
     def _command_worker(self):
+
+        print("🧵 Worker started")
 
         while True:
 
             try:
 
                 job = self.command_queue.get()
+
+                print("⚙️ Worker processing job")
 
                 item = job["item"]
                 sender = job["sender"]
@@ -1148,67 +1158,82 @@ class WSClient:
         return 0
 
     def process_whatsapp(self, item):
-        # WAO
+
         number = item.get("to")
         permission = item.get("permission")
         app = item.get("platform", "WAB")
-        delay = item.get("delay")
+        delay = item.get("delay", 2)
 
         if not self.wa:
-           return {"ok": False, "msg": "WhatsAppAutomation not ready"}
+            return {"ok": False, "msg": "WhatsAppAutomation not ready"}
 
-        if permission == "call":            
-            call_type = item.get("type","voice")
-                   
-            if self.wa:
-                self.wa.app = app
-                self.wa.package = "com.whatsapp.w4b" if app=="WAB" else "com.whatsapp"
-                self.wa.open_whatsapp_chat(number)                
+        try:
+
+            self.wa.app = app
+            self.wa.package = "com.whatsapp.w4b" if app=="WAB" else "com.whatsapp"
+
+            if permission == "call":
+
+                call_type = item.get("type","voice")
+
+                self.wa.open_whatsapp_chat(number)
                 time.sleep(2)
 
-                # 🔥 CEK NOMOR TIDAK TERDAFTAR
                 if self.wa.handle_not_registered_popup():
-                    return {"ok": False, "msg": f"Nomor {number} tidak terdaftar, skip"}                    
-                
-                 # 3️⃣ Tap tombol end call
+                    return {"ok": False, "msg": f"Nomor {number} tidak terdaftar"}
+
                 self.wa._tap_button(
                     "e2ee_description_close_button",
                     desc_keywords=["tutup", "end", "panggilan"]
                 )
-                         
-                self.wa.click_call(call_type)
-                time.sleep(2) 
-                # 2️⃣ Handle popup jika muncul
-                self.wa.handle_call_popup()
-                time.sleep(delay)     
-                self.wa._tap_button("end_call_button")                
-                durasi = self.wa.get_durasi()
-                if self.durasi_to_seconds(self,durasi) >= 10:                   
-                    self.wa._tap_button("end_call_button")
-                    return {"ok": True, "msg": "Panggilan WhatsApp berhasil", "duration": durasi}
-                
 
-        elif permission == "message":    
-            text = item.get("text")          
-            if self.wa:
-                self.wa.app = app
-                self.wa.package = "com.whatsapp.w4b" if app=="WAB" else "com.whatsapp"
+                self.wa.click_call(call_type)
+                time.sleep(2)
+
+                self.wa.handle_call_popup()
+
+                time.sleep(delay)
+
+                self.wa._tap_button("end_call_button")
+
+                durasi = self.wa.get_durasi()
+                get_call_status = self.wa.get_call_status()
+                if self.durasi_to_seconds(durasi) >= 10:
+                    return {"ok": True, "msg": "Panggilan WhatsApp berhasil", "duration": durasi, "call_status": get_call_status}
+                else:
+                    return {"ok": False, "msg": "Durasi panggilan terlalu singkat", "duration": durasi, "call_status": get_call_status}
+
+            elif permission == "message":
+
+                text = item.get("text")
+
                 self.wa.open_whatsapp_chat(number)
                 time.sleep(3)
 
                 if self.wa.handle_not_registered_popup():
-                    return {"ok": False, "msg": f"Nomor {number} tidak terdaftar, skip"}                      
-                                
+                    return {"ok": False, "msg": f"Nomor {number} tidak terdaftar"}
+
                 self.wa.toggle_entry()
-                 # 3️⃣ Tap tombol end call
+
                 self.wa._tap_button(
                     "e2ee_description_close_button",
                     desc_keywords=["tutup", "end", "panggilan"]
-                )                            
+                )
+
                 self.wa.type_text_like_human(text)
-                time.sleep(delay)  
-                self.wa.send_message() 
-                return {"ok": True, "msg": "Pesan WhatsApp berhasil"}     
+
+                time.sleep(delay)
+
+                self.wa.send_message()
+
+                return {"ok": True, "msg": "Pesan WhatsApp berhasil"}
+
+            else:
+                return {"ok": False, "msg": "permission tidak dikenal"}
+
+        except Exception as e:
+
+            return {"ok": False, "msg": str(e)}   
 
     def process_telepon_selular(self, item):
         # TLC
