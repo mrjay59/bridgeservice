@@ -16,6 +16,7 @@ import base64
 import threading
 import subprocess
 import sys
+from PIL.DdsImagePlugin import item
 import requests
 import urllib.parse  # Pindah import ke atas
 from datetime import datetime, timezone
@@ -1201,17 +1202,14 @@ class WSClient:
                 time.sleep(2)
 
                 self.wa.handle_call_popup()
-
-                time.sleep(delay)
-
-                self.wa._tap_button("end_call_button")
-
-                durasi = self.wa.get_durasi()
                 get_call_status = self.wa.get_call_status()
+                time.sleep(delay)
+                self.wa._tap_button("end_call_button")
+                durasi = self.wa.get_durasi()                
                 if self.durasi_to_seconds(durasi) >= 10:
-                    return {"ok": True, "msg": "Panggilan WhatsApp berhasil", "duration": durasi, "call_status": get_call_status}
+                    return {"ok": True, "msg": "Panggilan WhatsApp berhasil", "duration": durasi, "call_status": get_call_status, "number": number}
                 else:
-                    return {"ok": False, "msg": "Durasi panggilan terlalu singkat", "duration": durasi, "call_status": get_call_status}
+                    return {"ok": True, "msg": "Durasi panggilan terlalu singkat", "duration": durasi, "call_status": get_call_status, "number": number}
 
             elif permission == "message":
 
@@ -1236,10 +1234,10 @@ class WSClient:
 
                 self.wa.send_message()
 
-                return {"ok": True, "msg": "Pesan WhatsApp berhasil"}
+                return {"ok": True, "msg": "Pesan WhatsApp berhasil", "number": number}
 
             else:
-                return {"ok": False, "msg": "permission tidak dikenal"}
+                return {"ok": False, "msg": "permission tidak dikenal", "number": number}
 
         except Exception as e:
 
@@ -1260,17 +1258,17 @@ class WSClient:
             if duration >= "00:10":
                 print("⛔ Ending call...")
                 self.ui_call.end_call()
-                return {"ok": True, "msg": "Telepon selular berhasil", "duration": duration}
+                return {"ok": True, "msg": "Telepon selular berhasil", "duration": duration, "number": number}
 
     def process_sms(self, item):           
         permission = item.get("permission")       
-        delay = item.get("delay")
+        delay = item.get("delay")         
 
         if permission == "message":  
             n = item.get("to"); t = item.get("text"); s = item.get("sim", 0)
             self.sms.send_sms(n, t, s)
             time.sleep(delay)
-            return {"ok": True, "msg": "SMS berhasil"}
+            return {"ok": True, "msg": "SMS berhasil", "number": n}
 
     def process_adbshell(self, item):
         serial = get_serial(self.adb)
