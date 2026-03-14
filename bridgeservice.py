@@ -1061,24 +1061,22 @@ class WSClient:
                 item["retry"] = item.get("retry", 0) + 1
                 item["lastError"] = str(e)
 
-                self._send_ack(ws, item, False)
+                 
 
     def _send_ws_ack(self, status, payload, to_user, request_id):
 
-        serial = get_serial(self.adb)
-
         msg = {
             "type": "ack",
-            "from": serial,
             "to": to_user,
             "status": status,
             "request_id": request_id,
             "payload": payload
         }
 
+        print("📤 SEND ACK:", msg)
+
         try:
             self.ws.send(json.dumps(msg))
-            print("ACK SENT:", msg)
         except Exception as e:
             print("WS ACK send error:", e)
 
