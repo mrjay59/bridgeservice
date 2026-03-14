@@ -1162,7 +1162,7 @@ class WSClient:
         number = item.get("to")
         permission = item.get("permission")
         app = item.get("platform", "WAB")
-        delay = item.get("delay", 2)
+        delay = item.get("delay", 25)
 
         if not self.wa:
             return {"ok": False, "msg": "WhatsAppAutomation not ready"}
