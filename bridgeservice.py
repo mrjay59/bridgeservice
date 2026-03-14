@@ -19,6 +19,7 @@ import sys
 import requests
 import urllib.parse  # Pindah import ke atas
 from datetime import datetime, timezone
+from queue import Queue
 
 
 try:
@@ -832,6 +833,15 @@ class WSClient:
         self._stop = threading.Event()
         self.wa = None
         self.reconnect_attempt = 0
+
+        self.command_queue = Queue()
+
+        # worker thread
+        self.worker_thread = threading.Thread(
+            target=self._command_worker,
+            daemon=True
+        )
+        self.worker_thread.start()
         
         try:
             self.wa = WhatsAppAutomation(self.adb, app="business")
@@ -960,20 +970,15 @@ class WSClient:
 
             for item in data_list:
 
-                try:
+                job = {
+                    "item": item,
+                    "sender": sender,
+                    "request_id": request_id
+                }
 
-                    # jalankan task android
-                    self._handle_locandro_item(ws, item, sender, request_id)
+                self.command_queue.put(job)
 
-                    
-                except Exception as e:
-
-                    self._send_ws_error(
-                        "process_failed",
-                        str(e),
-                        sender,
-                        request_id
-                    )
+                print("📥 QUEUE COMMAND:", item.get("platform"))
 
         except json.JSONDecodeError as e:
 
@@ -1061,8 +1066,33 @@ class WSClient:
                 item["retry"] = item.get("retry", 0) + 1
                 item["lastError"] = str(e)
 
-                 
+    def _command_worker(self):
 
+        while True:
+
+            try:
+
+                job = self.command_queue.get()
+
+                item = job["item"]
+                sender = job["sender"]
+                request_id = job["request_id"]
+
+                self._handle_locandro_item(
+                    self.ws,
+                    item,
+                    sender,
+                    request_id
+                )
+
+            except Exception as e:
+
+                print("❌ Worker error:", e)
+
+            finally:
+
+                self.command_queue.task_done()
+                        
     def _send_ws_ack(self, status, payload, to_user, request_id):
 
         msg = {
@@ -1073,12 +1103,21 @@ class WSClient:
             "payload": payload
         }
 
-        print("📤 SEND ACK:", msg)
-
         try:
+
+            with self._connection_lock:
+
+                if not self.ws_connected:
+                    print("⚠️ ACK skipped (WS disconnected)")
+                    return
+
             self.ws.send(json.dumps(msg))
+
+            print("📤 ACK SENT:", status)
+
         except Exception as e:
-            print("WS ACK send error:", e)
+
+            print("❌ ACK send error:", e)
 
     def _send_ws_error(self, error, message, to_user=None, request_id=None):
 
@@ -1144,7 +1183,7 @@ class WSClient:
                 time.sleep(delay)     
                 self.wa._tap_button("end_call_button")                
                 durasi = self.wa.get_durasi()
-                if self.durasi_to_seconds(durasi) >= 10:                   
+                if self.durasi_to_seconds(self,durasi) >= 10:                   
                     self.wa._tap_button("end_call_button")
                     return {"ok": True, "msg": "Panggilan WhatsApp berhasil", "duration": durasi}
                 
@@ -1292,7 +1331,7 @@ class WSClient:
             self.ws_connected = False
 
     def _on_error(self, ws, err):
-        log_print(f"WS run error: {e}", "ERROR")
+        log_print(f"WS run error: {err}", "ERROR")
         with self._connection_lock:
             self.ws_connected = False
 
@@ -1310,7 +1349,7 @@ class WSClient:
                     on_error=self._on_error
                 )
 
-                self.ws.run_forever(ping_interval=30, ping_timeout=10)
+                self.ws.run_forever(ping_interval=20, ping_timeout=15)
 
             except Exception as e:
                 log_print(f"WS run error: {e}", "ERROR")
