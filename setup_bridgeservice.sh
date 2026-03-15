@@ -1,5 +1,5 @@
 #!/data/data/com.termux/files/usr/bin/bash
-# setup_bridgeservice.sh - STABLE FINAL (Termux SAFE)
+# setup_bridgeservice.sh - STABLE FINAL (Termux FIXED)
 
 set -o pipefail
 
@@ -18,10 +18,13 @@ echo "======================================"
 
 echo "[BridgeSetup] Updating packages..."
 pkg update -y || true
+pkg upgrade -y || true
 
 echo "[BridgeSetup] Installing base system packages..."
 pkg install -y \
   python \
+  python-pip \
+  python-psutil \
   git \
   wget \
   curl \
@@ -43,11 +46,14 @@ echo "[BridgeSetup] Python info:"
 python --version
 pip --version
 
+echo "[BridgeSetup] Upgrading pip..."
+pip install --upgrade pip setuptools wheel
+
 echo "[BridgeSetup] Installing Python modules via pip..."
+
 pip install --no-cache-dir \
   requests \
   websocket-client \
-  psutil \
   adbutils \
   uiautomator2 \
   aiohttp \
