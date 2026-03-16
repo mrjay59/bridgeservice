@@ -965,7 +965,7 @@ class WhatsAppAutomation:
         print("⚠️ Call option not found")
         return False
 
-    def wait_voip_screen(self, timeout=5):
+    def wait_voip_screen(self, timeout=10):
        
         start = time.time()
 
@@ -975,16 +975,16 @@ class WhatsAppAutomation:
                 print("📞 VoipActivity detected")
                 return True
 
-            time.sleep(0.3)
+            time.sleep(0.5)
 
         print("⚠️ VOIP screen tidak muncul")
         return False
     
     def is_voip_active(self):
 
-        out = self.adb.shell("dumpsys activity top")
+        out = self.adb.shell("dumpsys activity top | grep VoipActivity")
 
-        if "VoipActivity" in out:
+        if "calling.ui.VoipActivity" in out:
             return True
 
         return False
