@@ -19,7 +19,7 @@ class WhatsAppAutomation:
 
     def login_whatsappbybarcode(self):
         try:
-            if not self._click_agree_continue():
+            if not self.click_agree_continue():
                 return False
             time.sleep(1)
             if not self._open_linked_devices_menu():
@@ -33,7 +33,7 @@ class WhatsAppAutomation:
 
     def login_whatsappbynumber(self, phone_number):
         try:
-            if not self._click_agree_continue():
+            if not self.click_agree_continue():
                 return False
             time.sleep(1)
             if not phone_number:
@@ -49,48 +49,39 @@ class WhatsAppAutomation:
             print("login_whatsappbynumber error:", e)
             return False
 
-    def login_whatsapp_business(self):
-        try:
-            if not self._click_agree_continue_business():
-                return False
-            time.sleep(1)
-            return self.login_whatsappbybarcode()
-        except Exception as e:
-            print("login_whatsapp_business error:", e)
-            return False
+    def click_agree_continue(self):
 
-    def _click_agree_continue(self):
         xml = self.dump_ui()
+
         try:
             root = ET.fromstring(xml)
         except Exception:
             return False
-        for node in root.iter('node'):
-            if node.attrib.get('resource-id') == 'com.whatsapp:id/eula_accept' and node.attrib.get('text') == 'AGREE AND CONTINUE':
-                bounds = node.attrib.get('bounds')
-                if bounds:
-                    x1,y1,x2,y2 = map(int, re.findall(r'\d+', bounds))
-                    cx,cy = (x1+x2)//2, (y1+y2)//2
-                    self.adb.shell(f"input tap {cx} {cy}")
-                    time.sleep(1)
-                    return True
-        return False
 
-    def _click_agree_continue_business(self):
-        xml = self.dump_ui()
-        try:
-            root = ET.fromstring(xml)
-        except Exception:
-            return False
-        for node in root.iter('node'):
-            if node.attrib.get('resource-id') == 'com.whatsapp.w4b:id/eula_accept' and node.attrib.get('text') == 'AGREE AND CONTINUE':
-                bounds = node.attrib.get('bounds')
-                if bounds:
-                    x1,y1,x2,y2 = map(int, re.findall(r'\d+', bounds))
-                    cx,cy = (x1+x2)//2, (y1+y2)//2
-                    self.adb.shell(f"input tap {cx} {cy}")
-                    time.sleep(1)
-                    return True
+        for node in root.iter("node"):
+
+            res_id = node.attrib.get("resource-id","")
+            text = (node.attrib.get("text") or "").lower()
+
+            if (
+                "eula_accept" in res_id
+                and ("agree" in text or "setuju" in text)
+            ):
+
+                bounds = node.attrib.get("bounds")
+                if not bounds:
+                    continue
+
+                x1,y1,x2,y2 = map(int,re.findall(r"\d+",bounds))
+                cx,cy = (x1+x2)//2,(y1+y2)//2
+
+                print("Tap Agree & Continue")
+
+                self.adb.shell(f"input tap {cx} {cy}")
+                time.sleep(1)
+
+                return True
+
         return False
 
     def _input_phone_number(self, phone_number):
@@ -176,6 +167,59 @@ class WhatsAppAutomation:
                     except Exception:
                         pass
         return False
+
+    def is_login_screen(self):
+
+        xml = self.dump_ui()
+
+        try:
+            root = ET.fromstring(xml)
+        except Exception:
+            return False
+
+        for node in root.iter("node"):
+
+            res_id = node.attrib.get("resource-id","")
+            text = (node.attrib.get("text") or "").lower()
+
+            # tombol agree
+            if "eula_accept" in res_id:
+                return True
+
+            # form nomor telepon
+            if "registration_phone" in res_id:
+                return True
+
+            # teks login
+            if "enter your phone" in text:
+                return True
+
+        return False
+    
+    def ensure_logged_in(self):
+
+        xml = self.dump_ui()
+
+        try:
+            root = ET.fromstring(xml)
+        except Exception:
+            return True
+
+        # cek tombol agree
+        if self.click_agree_continue():
+            print("WA belum login → Agree clicked")
+            return False
+
+        # cek form login
+        for node in root.iter("node"):
+
+            res_id = node.attrib.get("resource-id","")
+
+            if "registration_phone" in res_id:
+                print("WA belum login → phone input detected")
+                return False
+
+        return True
 
     def _get_qr_code(self):
         xml = self.dump_ui()
@@ -628,68 +672,87 @@ class WhatsAppAutomation:
         return False
     
     def click_call(self, call_type="voice"):
+
         xml = self.dump_ui()
+
         try:
             root = ET.fromstring(xml)
         except Exception:
             return False
-        target_desc = "Telepon suara" if call_type=="voice" else "Telepon video"
-        for node in root.iter('node'):
-            desc = node.attrib.get('content-desc') or ''
-            if target_desc in desc:
-                b = node.attrib.get('bounds')
-                if b:
-                    x1,y1,x2,y2 = map(int, re.findall(r'\d+', b))
+
+        if call_type == "voice":
+            keywords = ["voice call", "telepon suara"]
+        else:
+            keywords = ["video call", "telepon video"]
+
+        for node in root.iter("node"):
+
+            desc = (node.attrib.get("content-desc") or "").lower()
+
+            if any(k in desc for k in keywords):
+
+                bounds = node.attrib.get("bounds")
+
+                if bounds:
+                    x1,y1,x2,y2 = map(int, re.findall(r'\d+', bounds))
                     cx,cy = (x1+x2)//2,(y1+y2)//2
+
+                    print("📞 Tap call button:", desc)
+
                     self.adb.shell(f"input tap {cx} {cy}")
                     time.sleep(1)
+
                     return True
+
+        print("⚠️ Call button not found")
         return False
 
-    def handle_call_popup(self, timeout=3.0) -> bool:
-        """
-        Handle popup konfirmasi 'Telepon' setelah klik voice call
-        Return True jika popup diklik, False jika tidak muncul
-        """
+    def handle_call_popup(self, timeout=3.0):
+
         end_time = time.time() + timeout
 
+        keywords = ["call", "telepon"]
+
         while time.time() < end_time:
+
             try:
+
                 self.adb.shell("uiautomator dump /sdcard/window_dump.xml")
                 time.sleep(0.3)
 
                 xml = self.adb.shell("cat /sdcard/window_dump.xml")
+
                 if "<?xml" not in xml:
                     continue
 
                 root = ET.fromstring(xml[xml.index("<?xml"):])
 
                 for node in root.iter("node"):
-                    text = node.attrib.get("text", "").strip().lower()
+
+                    text = (node.attrib.get("text") or "").lower()
                     res_id = node.attrib.get("resource-id", "")
                     clickable = node.attrib.get("clickable") == "true"
                     enabled = node.attrib.get("enabled") == "true"
 
-                    # Match tombol Telepon
-                    if (
-                        clickable and enabled and
-                        (
-                            res_id == "android:id/button1" or
-                            text == "Telepon"
-                        )
-                    ):
-                        bounds = node.attrib.get("bounds")
-                        if not bounds:
-                            continue
+                    if clickable and enabled:
 
-                        nums = re.findall(r"\d+", bounds)
-                        if len(nums) == 4:
-                            x1, y1, x2, y2 = map(int, nums)
-                            cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
+                        if (
+                            res_id == "android:id/button1"
+                            or any(k in text for k in keywords)
+                        ):
 
-                            print("Popup Telepon detected → tap")
+                            bounds = node.attrib.get("bounds")
+                            if not bounds:
+                                continue
+
+                            x1,y1,x2,y2 = map(int,re.findall(r"\d+",bounds))
+                            cx,cy = (x1+x2)//2,(y1+y2)//2
+
+                            print("📞 Call popup detected → tap")
+
                             self.adb.shell(f"input tap {cx} {cy}")
                             time.sleep(0.5)
+
                             return True
 
             except Exception as e:

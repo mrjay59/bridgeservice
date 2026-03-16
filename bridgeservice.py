@@ -1190,6 +1190,10 @@ class WSClient:
                 self.wa.open_whatsapp_chat(number)
                 time.sleep(2)
 
+                # VALIDASI LOGIN
+                if not self.wa.ensure_logged_in():
+                    return {"ok": False, "msg": "WhatsApp belum login"}
+
                 if self.wa.handle_not_registered_popup():
                     return {"ok": False, "msg": f"Nomor {number} tidak terdaftar"}
 
