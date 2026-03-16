@@ -241,7 +241,7 @@ class WhatsAppAutomation:
 
         return True
 
-    def handle_privacy_popup(self, timeout=3):
+    def handle_privacy_popup(self, timeout=1.5):
 
         end_time = time.time() + timeout
 
@@ -342,89 +342,64 @@ class WhatsAppAutomation:
            
     def get_call_status(self):
 
+        xml = self.dump_ui()
+
+        if not xml:
+            return "unknown"
+
         try:
-
-            self.adb.shell("uiautomator dump /sdcard/window_dump.xml")
-            time.sleep(0.3)
-
-            xml = self.adb.shell("cat /sdcard/window_dump.xml")
-
-            if "<?xml" not in xml:
-                return "idle"
-
-            root = ET.fromstring(xml[xml.index("<?xml"):])
-
-            # =========================
-            # 1️⃣ DETECT CALL UI
-            # =========================
-            in_call_ui = False
+            root = ET.fromstring(xml)
 
             for node in root.iter("node"):
 
                 res_id = node.attrib.get("resource-id", "")
+                text = node.attrib.get("text", "").strip().lower()
 
-                if any(x in res_id for x in [
-                    "call_screen_root",
-                    "voip_calling_layout",
-                    "voip_call_controls"
-                ]):
-                    in_call_ui = True
-                    break
+                if res_id.endswith("id/subtitle") and text:
 
-            if not in_call_ui:
-                return "idle"
+                    # ======================
+                    # CALLING
+                    # ======================
+                    if any(k in text for k in [
+                        "calling",
+                        "memanggil"
+                    ]):
+                        return "calling"
 
+                    # ======================
+                    # RINGING
+                    # ======================
+                    if any(k in text for k in [
+                        "ringing",
+                        "berdering"
+                    ]):
+                        return "ringing"
 
-            # =========================
-            # 2️⃣ STATUS SUBTITLE (BEST)
-            # =========================
-            for node in root.iter("node"):
+                    # ======================
+                    # CONNECTING
+                    # ======================
+                    if any(k in text for k in [
+                        "connecting",
+                        "menghubungkan"
+                    ]):
+                        return "connecting"
 
-                res_id = node.attrib.get("resource-id", "")
+                    # ======================
+                    # CONNECTED
+                    # ======================
+                    if any(k in text for k in [
+                        "connected",
+                        "terhubung"
+                    ]):
+                        return "connected"
 
-                if res_id.endswith(":id/subtitle"):
+                    return text
 
-                    txt = node.attrib.get("text", "").strip().lower()
-
-                    if txt and "encrypted" not in txt:
-                        return txt
-
-
-            # =========================
-            # 3️⃣ KEYWORD FALLBACK
-            # =========================
-            keywords = [
-                "calling",
-                "ringing",
-                "connected",
-                "memanggil",
-                "berdering",
-                "terhubung",
-                "panggilan"
-            ]
-
-            for node in root.iter("node"):
-
-                txt = node.attrib.get("text", "").lower()
-
-                if "encrypted" in txt:
-                    continue
-
-                if any(k in txt for k in keywords):
-                    return txt
-
-
-            # =========================
-            # 4️⃣ DEFAULT
-            # =========================
             return "in_call"
 
-
         except Exception as e:
-
             print("get_call_status error:", e)
-
-            return "unknown"    
+            return "unknown"
 
     def _wake_call_ui(self):
         self.adb.shell("input keyevent 24")  # VOLUME_UP
