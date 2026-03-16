@@ -574,7 +574,7 @@ class WhatsAppAutomation:
     def open_whatsapp_chat(self, number):
         try:
             self.adb.shell(f"am start -a android.intent.action.VIEW -d 'https://wa.me/{number}' {self.package}")
-            time.sleep(1)
+            time.sleep(0.5)
             xml = self.dump_ui()
             try:
                 root = ET.fromstring(xml)
@@ -589,7 +589,7 @@ class WhatsAppAutomation:
                         x1,y1,x2,y2 = map(int, re.findall(r'\d+', b))
                         cx,cy = (x1+x2)//2,(y1+y2)//2
                         self.adb.shell(f"input tap {cx} {cy}")
-                        time.sleep(1)
+                        time.sleep(0.5)
                         break
             return True
         except Exception as e:
@@ -965,7 +965,7 @@ class WhatsAppAutomation:
         print("⚠️ Call option not found")
         return False
 
-    def wait_voip_screen(self, timeout=10):
+    def wait_voip_screen(self, timeout=7):
        
         start = time.time()
 
