@@ -1188,7 +1188,7 @@ class WSClient:
                 call_type = item.get("type","voice")
 
                 self.wa.open_whatsapp_chat(number)
-                time.sleep(2)
+                time.sleep(1)
 
                 # VALIDASI LOGIN
                 if not self.wa.ensure_logged_in():
@@ -1203,19 +1203,22 @@ class WSClient:
                 time.sleep(2)
 
                 self.wa.handle_call_popup()
-                # start timer saat call mulai
-                start_time = time.time()
+                # tunggu screen call muncul
+                if not self.wa.wait_voip_screen():
+                    return {"ok": False, "msg": "VOIP screen tidak muncul"}
 
-                get_call_status = self.wa.wait_call_status()
+                get_call_status = "calling"
 
-                # hitung sisa waktu
-                elapsed = time.time() - start_time
-                remaining = max(0, delay - elapsed)
+                # start timer
+                call_start = time.time()
 
-                time.sleep(remaining)
+                time.sleep(delay)
 
-                durasi = self.wa.get_durasi() or "00:00"
+                call_seconds = int(time.time() - call_start)
 
+                durasi = f"{call_seconds//60:02d}:{call_seconds%60:02d}"
+
+                self.wa.wake_any_call_screen()                
                 self.wa._tap_button("end_call_button")
 
                 seconds = self.durasi_to_seconds(durasi)

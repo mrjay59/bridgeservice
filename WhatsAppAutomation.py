@@ -430,6 +430,42 @@ class WhatsAppAutomation:
         self.adb.shell("input keyevent 24")  # VOLUME_UP
         time.sleep(0.2)
 
+    def wake_any_call_screen(self):
+
+        out = self.adb.shell("dumpsys activity activities")
+
+        # WhatsApp Personal
+        if "com.whatsapp/.calling.ui.VoipActivity" in out:
+            print("📞 Wake WhatsApp call screen")
+
+            self.adb.shell(
+                "am start -n com.whatsapp/com.whatsapp.calling.ui.VoipActivityV2"
+            )
+            time.sleep(1)
+            return "WA"
+
+        # WhatsApp Business
+        if "com.whatsapp.w4b/.calling.ui.VoipActivity" in out:
+            print("📞 Wake WhatsApp Business call screen")
+
+            self.adb.shell(
+                "am start -n com.whatsapp.w4b/com.whatsapp.calling.ui.VoipActivityV2"
+            )
+            time.sleep(1)
+            return "WAB"
+
+        # GSM Call
+        if "InCallActivity" in out:
+            print("📞 Wake GSM call screen")
+
+            self.adb.shell(
+                "am start -n com.android.incallui/com.android.incallui.InCallActivity"
+            )
+            time.sleep(1)
+            return "GSM"
+
+        return None
+
     def _tap_button(self, button_id: str, desc_keywords=None):
         try:
             # 🔥 WAJIB: bangunkan UI call (tap area kosong)
@@ -538,7 +574,7 @@ class WhatsAppAutomation:
     def open_whatsapp_chat(self, number):
         try:
             self.adb.shell(f"am start -a android.intent.action.VIEW -d 'https://wa.me/{number}' {self.package}")
-            time.sleep(2)
+            time.sleep(1)
             xml = self.dump_ui()
             try:
                 root = ET.fromstring(xml)
@@ -819,13 +855,25 @@ class WhatsAppAutomation:
         # =========================
         for node in root.iter("node"):
 
+            cls = node.attrib.get("class", "")
+            pkg = node.attrib.get("package", "")
             desc = (node.attrib.get("content-desc") or "").lower()
 
-            if any(k in desc for k in direct_keywords):
+            if cls == "android.widget.ImageButton" and pkg in ["com.whatsapp", "com.whatsapp.w4b"]:
 
-                bounds = node.attrib.get("bounds")
+                if call_type == "voice" and desc == "voice call":
+                    target = True
+                elif call_type == "video" and desc == "video call":
+                    target = True
+                else:
+                    target = False
 
-                if bounds:
+                if target:
+
+                    bounds = node.attrib.get("bounds")
+                    if not bounds:
+                        continue
+
                     x1,y1,x2,y2 = map(int,re.findall(r"\d+",bounds))
                     cx,cy = (x1+x2)//2,(y1+y2)//2
 
@@ -836,66 +884,109 @@ class WhatsAppAutomation:
 
                     return True
 
-
         # =========================
-        # 2️⃣ DROPDOWN VERSION
-        # =========================
-        for node in root.iter("node"):
-
-            desc = (node.attrib.get("content-desc") or "").lower()
-
-            if desc in ["call", "telepon"]:
-
-                bounds = node.attrib.get("bounds")
-
-                if bounds:
-                    x1,y1,x2,y2 = map(int,re.findall(r"\d+",bounds))
-                    cx,cy = (x1+x2)//2,(y1+y2)//2
-
-                    print("📞 Tap call dropdown")
-
-                    self.adb.shell(f"input tap {cx} {cy}")
-                    time.sleep(1)
-
-                    break
-
-        # =========================
-        # 3️⃣ SELECT FROM DROPDOWN
+        # STEP 1 - klik tombol Call
         # =========================
         xml = self.dump_ui()
 
         try:
             root = ET.fromstring(xml)
-        except Exception:
+        except:
             return False
 
-        if call_type == "voice":
-            dropdown_keywords = ["voice call","panggilan suara","telepon suara"]
-        else:
-            dropdown_keywords = ["video call","panggilan video","telepon video"]
+        call_clicked = False
 
         for node in root.iter("node"):
 
+            cls = node.attrib.get("class", "")
             desc = (node.attrib.get("content-desc") or "").lower()
-            text = (node.attrib.get("text") or "").lower()
 
-            if any(k in desc or k in text for k in dropdown_keywords):
+            if cls == "android.widget.ImageButton" and desc in ["call", "telepon"]:
 
                 bounds = node.attrib.get("bounds")
+                if not bounds:
+                    continue
 
-                if bounds:
-                    x1,y1,x2,y2 = map(int,re.findall(r"\d+",bounds))
-                    cx,cy = (x1+x2)//2,(y1+y2)//2
+                x1,y1,x2,y2 = map(int, re.findall(r"\d+", bounds))
+                cx,cy = (x1+x2)//2,(y1+y2)//2
 
-                    print("📞 Select call type:", desc or text)
+                print("📞 Tap Call button")
 
-                    self.adb.shell(f"input tap {cx} {cy}")
-                    time.sleep(1)
+                self.adb.shell(f"input tap {cx} {cy}")
+                time.sleep(1)
 
-                    return True
+                call_clicked = True
+                break
+
+        if not call_clicked:
+            print("⚠️ Call button not found")
+            return False
 
 
-        print("⚠️ Call button not found")
+        # =========================
+        # STEP 2 - pilih Voice/Video
+        # =========================
+        xml = self.dump_ui()
+
+        try:
+            root = ET.fromstring(xml)
+        except:
+            return False
+
+
+        if call_type == "voice":
+            keywords = ["voice call", "panggilan suara"]
+        else:
+            keywords = ["video call", "panggilan video"]
+
+
+        for node in root.iter("node"):
+
+            text = (node.attrib.get("text") or "").lower()
+            res_id = node.attrib.get("resource-id","")
+
+            if "menu_title" in res_id and any(k in text for k in keywords):
+
+                bounds = node.attrib.get("bounds")
+                if not bounds:
+                    continue
+
+                x1,y1,x2,y2 = map(int, re.findall(r"\d+", bounds))
+                cx,cy = (x1+x2)//2,(y1+y2)//2
+
+                print("📞 Select:", text)
+
+                self.adb.shell(f"input tap {cx} {cy}")
+                time.sleep(1)
+
+                return True
+
+
+        print("⚠️ Call option not found")
+        return False
+
+    def wait_voip_screen(self, timeout=5):
+       
+        start = time.time()
+
+        while time.time() - start < timeout:
+
+            if self.is_voip_active():
+                print("📞 VoipActivity detected")
+                return True
+
+            time.sleep(0.3)
+
+        print("⚠️ VOIP screen tidak muncul")
+        return False
+    
+    def is_voip_active(self):
+
+        out = self.adb.shell("dumpsys activity top")
+
+        if "VoipActivity" in out:
+            return True
+
         return False
 
     def handle_call_popup(self, timeout=3.0):
