@@ -1206,7 +1206,7 @@ class WSClient:
                 time.sleep(2)
 
                 self.wa.handle_call_popup()
-                get_call_status = self.wa.get_call_status()
+                get_call_status = self.wa.wait_call_status()
                 time.sleep(delay)
                 self.wa._tap_button("end_call_button")
                 durasi = self.wa.get_durasi()                

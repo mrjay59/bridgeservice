@@ -196,6 +196,26 @@ class WhatsAppAutomation:
 
         return False
     
+    def wait_call_status(self, timeout=6):
+
+        end_time = time.time() + timeout
+
+        valid_keywords = [
+            "calling","ringing","connected",
+            "memanggil","berdering","terhubung"
+        ]
+
+        while time.time() < end_time:
+
+            status = (self.get_call_status() or "").lower()
+
+            if any(k in status for k in valid_keywords):
+                return status
+
+            time.sleep(0.5)
+
+        return status
+
     def ensure_logged_in(self):
 
         xml = self.dump_ui()
