@@ -241,6 +241,78 @@ class WhatsAppAutomation:
 
         return True
 
+    def handle_privacy_popup(self, timeout=3):
+
+        end_time = time.time() + timeout
+
+        while time.time() < end_time:
+
+            try:
+                self.adb.shell("uiautomator dump /sdcard/window_dump.xml")
+                time.sleep(0.4)
+
+                xml = self.adb.shell("cat /sdcard/window_dump.xml")
+                if "<?xml" not in xml:
+                    continue
+
+                root = ET.fromstring(xml[xml.index("<?xml"):])
+
+                for node in root.iter("node"):
+
+                    res_id = node.attrib.get("resource-id","")
+                    desc = (node.attrib.get("content-desc") or "").lower()
+                    clickable = node.attrib.get("clickable") == "true"
+
+                    if not clickable:
+                        continue
+
+                    # tombol close popup
+                    if (
+                        "e2ee_description_close_button" in res_id
+                        or desc in ["close","tutup"]
+                    ):
+
+                        bounds = node.attrib.get("bounds")
+                        if not bounds:
+                            continue
+
+                        x1,y1,x2,y2 = map(int,re.findall(r"\d+",bounds))
+                        cx,cy = (x1+x2)//2,(y1+y2)//2
+
+                        print("🔐 Privacy popup detected → close")
+
+                        self.adb.shell(f"input tap {cx} {cy}")
+                        time.sleep(0.6)
+
+                        return True
+
+                # fallback: tap outside sheet
+                for node in root.iter("node"):
+
+                    res_id = node.attrib.get("resource-id","")
+
+                    if "touch_outside" in res_id:
+
+                        bounds = node.attrib.get("bounds")
+                        if bounds:
+
+                            x1,y1,x2,y2 = map(int,re.findall(r"\d+",bounds))
+                            cx,cy = (x1+x2)//2,(y1+y2)//2
+
+                            print("🔐 Tap outside to close privacy popup")
+
+                            self.adb.shell(f"input tap {cx} {cy}")
+                            time.sleep(0.5)
+
+                            return True
+
+            except Exception as e:
+                print("handle_privacy_popup error:", e)
+
+            time.sleep(0.4)
+
+        return False
+
     def _get_qr_code(self):
         xml = self.dump_ui()
         try:
@@ -701,28 +773,90 @@ class WhatsAppAutomation:
             return False
 
         if call_type == "voice":
-            keywords = ["voice call", "telepon suara"]
+            direct_keywords = ["voice call", "telepon suara"]
         else:
-            keywords = ["video call", "telepon video"]
+            direct_keywords = ["video call", "telepon video"]
 
+        # =========================
+        # 1️⃣ DIRECT BUTTON VERSION
+        # =========================
         for node in root.iter("node"):
 
             desc = (node.attrib.get("content-desc") or "").lower()
 
-            if any(k in desc for k in keywords):
+            if any(k in desc for k in direct_keywords):
 
                 bounds = node.attrib.get("bounds")
 
                 if bounds:
-                    x1,y1,x2,y2 = map(int, re.findall(r'\d+', bounds))
+                    x1,y1,x2,y2 = map(int,re.findall(r"\d+",bounds))
                     cx,cy = (x1+x2)//2,(y1+y2)//2
 
-                    print("📞 Tap call button:", desc)
+                    print("📞 Direct call button:", desc)
 
                     self.adb.shell(f"input tap {cx} {cy}")
                     time.sleep(1)
 
                     return True
+
+
+        # =========================
+        # 2️⃣ DROPDOWN VERSION
+        # =========================
+        for node in root.iter("node"):
+
+            desc = (node.attrib.get("content-desc") or "").lower()
+
+            if desc in ["call", "telepon"]:
+
+                bounds = node.attrib.get("bounds")
+
+                if bounds:
+                    x1,y1,x2,y2 = map(int,re.findall(r"\d+",bounds))
+                    cx,cy = (x1+x2)//2,(y1+y2)//2
+
+                    print("📞 Tap call dropdown")
+
+                    self.adb.shell(f"input tap {cx} {cy}")
+                    time.sleep(1)
+
+                    break
+
+        # =========================
+        # 3️⃣ SELECT FROM DROPDOWN
+        # =========================
+        xml = self.dump_ui()
+
+        try:
+            root = ET.fromstring(xml)
+        except Exception:
+            return False
+
+        if call_type == "voice":
+            dropdown_keywords = ["voice call","panggilan suara","telepon suara"]
+        else:
+            dropdown_keywords = ["video call","panggilan video","telepon video"]
+
+        for node in root.iter("node"):
+
+            desc = (node.attrib.get("content-desc") or "").lower()
+            text = (node.attrib.get("text") or "").lower()
+
+            if any(k in desc or k in text for k in dropdown_keywords):
+
+                bounds = node.attrib.get("bounds")
+
+                if bounds:
+                    x1,y1,x2,y2 = map(int,re.findall(r"\d+",bounds))
+                    cx,cy = (x1+x2)//2,(y1+y2)//2
+
+                    print("📞 Select call type:", desc or text)
+
+                    self.adb.shell(f"input tap {cx} {cy}")
+                    time.sleep(1)
+
+                    return True
+
 
         print("⚠️ Call button not found")
         return False

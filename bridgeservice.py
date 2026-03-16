@@ -1197,10 +1197,7 @@ class WSClient:
                 if self.wa.handle_not_registered_popup():
                     return {"ok": False, "msg": f"Nomor {number} tidak terdaftar"}
 
-                self.wa._tap_button(
-                    "e2ee_description_close_button",
-                    desc_keywords=["tutup", "end", "panggilan"]
-                )
+                self.wa.handle_privacy_popup()
 
                 self.wa.click_call(call_type)
                 time.sleep(2)
