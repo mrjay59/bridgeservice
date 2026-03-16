@@ -1207,12 +1207,13 @@ class WSClient:
 
                 self.wa.handle_call_popup()
                 get_call_status = self.wa.wait_call_status()
-                time.sleep(delay)
-                self.wa._tap_button("end_call_button")
+                time.sleep(delay)                
                 durasi = self.wa.get_durasi()                
                 if self.durasi_to_seconds(durasi) >= 10:
+                    self.wa._tap_button("end_call_button")
                     return {"ok": True, "msg": "Panggilan WhatsApp berhasil", "duration": durasi, "call_status": get_call_status, "number": number}
                 else:
+                    self.wa._tap_button("end_call_button")
                     return {"ok": True, "msg": "Durasi panggilan terlalu singkat", "duration": durasi, "call_status": get_call_status, "number": number}
 
             elif permission == "message":
@@ -1257,12 +1258,14 @@ class WSClient:
             duration = self.ui_call.get_duration()
             sim = item.get("sim", 0)  # 0 untuk SIM 1, 1 untuk SIM 2
             make_cellular_call(self.adb, number, sim)
-            time.sleep(delay)
-            self.ui_call.end_call()
+            time.sleep(delay)            
             if duration >= "00:10":
                 print("⛔ Ending call...")
                 self.ui_call.end_call()
                 return {"ok": True, "msg": "Telepon selular berhasil", "duration": duration, "number": number}
+            else:
+                self.ui_call.end_call()
+                return {"ok": True, "msg": "Durasi panggilan terlalu singkat", "duration": duration, "number": number}
 
     def process_sms(self, item):           
         permission = item.get("permission")       
