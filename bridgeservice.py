@@ -1205,7 +1205,8 @@ class WSClient:
                 self.wa.handle_call_popup()
                 # tunggu screen call muncul
                 if not self.wa.wait_voip_screen():
-                    return {"ok": False, "msg": "VOIP screen tidak muncul"}
+                    self.wa.click_call(call_type)
+                    # return {"ok": False, "msg": "VOIP screen tidak muncul"}
 
                 get_call_status = self.wa.get_call_status()   
 
