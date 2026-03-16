@@ -1203,16 +1203,40 @@ class WSClient:
                 time.sleep(2)
 
                 self.wa.handle_call_popup()
-                get_call_status = self.wa.wait_call_status()
-                time.sleep(delay)                
-                durasi = self.wa.get_durasi()                
-                if self.durasi_to_seconds(durasi) >= 10:
-                    self.wa._tap_button("end_call_button")
-                    return {"ok": True, "msg": "Panggilan WhatsApp berhasil", "duration": durasi, "call_status": get_call_status, "number": number}
-                else:
-                    self.wa._tap_button("end_call_button")
-                    return {"ok": True, "msg": "Durasi panggilan terlalu singkat", "duration": durasi, "call_status": get_call_status, "number": number}
+                # start timer saat call mulai
+                start_time = time.time()
 
+                get_call_status = self.wa.wait_call_status()
+
+                # hitung sisa waktu
+                elapsed = time.time() - start_time
+                remaining = max(0, delay - elapsed)
+
+                time.sleep(remaining)
+
+                durasi = self.wa.get_durasi() or "00:00"
+
+                self.wa._tap_button("end_call_button")
+
+                seconds = self.durasi_to_seconds(durasi)
+
+                if seconds >= 10:
+                    return {
+                        "ok": True,
+                        "msg": "Panggilan WhatsApp berhasil",
+                        "duration": durasi,
+                        "call_status": get_call_status,
+                        "number": number
+                    }
+                else:
+                    return {
+                        "ok": True,
+                        "msg": "Durasi panggilan terlalu singkat",
+                        "duration": durasi,
+                        "call_status": get_call_status,
+                        "number": number
+                    }
+                
             elif permission == "message":
 
                 text = item.get("text")

@@ -341,53 +341,90 @@ class WhatsAppAutomation:
         return None
            
     def get_call_status(self):
+
         try:
-            # Dump UI
+
             self.adb.shell("uiautomator dump /sdcard/window_dump.xml")
             time.sleep(0.3)
 
             xml = self.adb.shell("cat /sdcard/window_dump.xml")
+
             if "<?xml" not in xml:
                 return "idle"
 
             root = ET.fromstring(xml[xml.index("<?xml"):])
 
-            # 1️⃣ Pastikan benar-benar di UI call WhatsApp
+            # =========================
+            # 1️⃣ DETECT CALL UI
+            # =========================
             in_call_ui = False
+
             for node in root.iter("node"):
+
                 res_id = node.attrib.get("resource-id", "")
-                if res_id.endswith(":id/call_screen_root"):
+
+                if any(x in res_id for x in [
+                    "call_screen_root",
+                    "voip_calling_layout",
+                    "voip_call_controls"
+                ]):
                     in_call_ui = True
                     break
 
             if not in_call_ui:
                 return "idle"
 
-            # 2️⃣ Ambil status dari subtitle (PALING AKURAT)
-            for node in root.iter("node"):
-                res_id = node.attrib.get("resource-id", "")
-                if res_id.endswith(":id/subtitle"):
-                    txt = node.attrib.get("text", "").strip()
-                    if txt:
-                        return txt.lower()  # contoh: memanggil, berdering, terhubung
 
-            # 3️⃣ Fallback: cari kata kunci status
-            fallback_keywords = [
-                "memanggil", "berdering", "sedang",
-                "calling", "ringing", "connected"
+            # =========================
+            # 2️⃣ STATUS SUBTITLE (BEST)
+            # =========================
+            for node in root.iter("node"):
+
+                res_id = node.attrib.get("resource-id", "")
+
+                if res_id.endswith(":id/subtitle"):
+
+                    txt = node.attrib.get("text", "").strip().lower()
+
+                    if txt and "encrypted" not in txt:
+                        return txt
+
+
+            # =========================
+            # 3️⃣ KEYWORD FALLBACK
+            # =========================
+            keywords = [
+                "calling",
+                "ringing",
+                "connected",
+                "memanggil",
+                "berdering",
+                "terhubung",
+                "panggilan"
             ]
 
             for node in root.iter("node"):
+
                 txt = node.attrib.get("text", "").lower()
-                if any(k in txt for k in fallback_keywords):
+
+                if "encrypted" in txt:
+                    continue
+
+                if any(k in txt for k in keywords):
                     return txt
 
-            # 4️⃣ Default
+
+            # =========================
+            # 4️⃣ DEFAULT
+            # =========================
             return "in_call"
 
+
         except Exception as e:
+
             print("get_call_status error:", e)
-            return "unknown"
+
+            return "unknown"    
 
     def _wake_call_ui(self):
         self.adb.shell("input keyevent 24")  # VOLUME_UP
