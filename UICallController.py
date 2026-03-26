@@ -234,12 +234,33 @@ class UICallController:
 
     def wait_until_connected(self, timeout=20) -> bool:
         """
-        Tunggu sampai call benar-benar connected
+        Tunggu sampai call benar-benar connected (multi bahasa & robust)
         """
         start = time.time()
+
+        CONNECTED_KEYWORDS = [
+            # English
+            "connected", "ongoing", "in call", "active",
+
+            # Indonesia
+            "sedang", "terhubung", "panggilan berlangsung",
+
+            # Umum vendor
+            "call in progress", "in progress"
+        ]
+
         while time.time() - start < timeout:
             status = self.get_status().lower()
-            if any(k in status for k in ["connected", "sedang", "ongoing"]):
+
+            # ✅ 1. cek status text
+            if any(k in status for k in CONNECTED_KEYWORDS):
                 return True
+
+            # ✅ 2. fallback: kalau durasi sudah jalan = pasti connected
+            duration = self.get_duration()
+            if duration and duration != "00:00":
+                return True
+
             time.sleep(1)
+
         return False

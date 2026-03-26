@@ -712,30 +712,25 @@ def handle_sim_chooser(adb, sim_index: int):
         sim_rows = []
 
         for node in root.iter("node"):
-            # baris SIM adalah LinearLayout langsung di ListView
-            if node.attrib.get("class") == "android.widget.LinearLayout":
-                bounds = node.attrib.get("bounds")
-                if not bounds:
-                    continue
+            if node.attrib.get("resource-id") == "com.android.dialer:id/select_dialog_listview":
 
-                # Filter hanya row dalam area ListView
-                # (menghindari container lain)
-                parent = node.attrib.get("package") == "com.android.dialer"
-                if parent:
-                    sim_rows.append(bounds)
+                # ambil children langsung (SIM list)
+                for child in node:
+                    bounds = child.attrib.get("bounds")
+                    if bounds:
+                        sim_rows.append(bounds)
 
-        if len(sim_rows) < sim_index + 1:
-            return False
+                break
 
         # ==========================
         # 3️⃣ Tap berdasarkan index
         # ==========================
-        bounds = sim_rows[sim_index]
-        nums = list(map(int, re.findall(r"\d+", bounds)))
-
-        if len(nums) != 4:
+        if len(sim_rows) <= sim_index:
             return False
 
+        bounds = sim_rows[sim_index]
+
+        nums = list(map(int, re.findall(r"\d+", bounds)))
         x1, y1, x2, y2 = nums
         cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
 
@@ -1246,7 +1241,7 @@ class WSClient:
                 text = item.get("text")
 
                 self.wa.open_whatsapp_chat(number)
-                time.sleep(3)
+                time.sleep(1)
 
                 if self.wa.handle_not_registered_popup():
                     return {"ok": False, "msg": f"Nomor {number} tidak terdaftar"}
@@ -1274,24 +1269,39 @@ class WSClient:
             return {"ok": False, "msg": str(e)}   
 
     def process_telepon_selular(self, item):
-        # TLC
         number = item.get("to")
         permission = item.get("permission")       
-        delay = item.get("delay")
+        delay = item.get("delay", 15)
 
-        if permission == "call":  
-            duration = self.ui_call.get_duration()
-            sim = item.get("sim", 0)  # 0 untuk SIM 1, 1 untuk SIM 2
+        if permission == "call":
+            sim = item.get("sim", 0)
+
             make_cellular_call(self.adb, number, sim)
-            time.sleep(delay)            
-            if duration >= "00:10":
-                print("⛔ Ending call...")
-                self.ui_call.end_call()
-                return {"ok": True, "msg": "Telepon selular berhasil", "duration": duration, "number": number}
-            else:
-                self.ui_call.end_call()
-                return {"ok": True, "msg": "Durasi panggilan terlalu singkat", "duration": duration, "number": number}
 
+            # ⏳ tunggu sampai connected
+            if not self.ui_call.wait_until_connected(timeout=20):
+                return {"ok": False, "msg": "Call tidak connect"}
+
+            # ⏱ mulai ambil durasi real
+            call_start = time.time()
+            duration = "00:00"
+
+            while time.time() - call_start < delay:
+                duration = self.ui_call.get_duration()
+                time.sleep(1)
+
+            print("⛔ Ending call...")
+            self.ui_call.end_call()
+
+            seconds = self.durasi_to_seconds(duration)
+
+            return {
+                "ok": True,
+                "msg": "Telepon selular selesai",
+                "duration": duration,
+                "seconds": seconds,
+                "number": number
+            }
     def process_sms(self, item):           
         permission = item.get("permission")       
         delay = item.get("delay")         
