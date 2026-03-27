@@ -240,11 +240,10 @@ class UICallController:
 
         CONNECTED_KEYWORDS = [
             # English
-            "connected", "ongoing", "in call", "active",
+            "connected", "ongoing", "in call", "active", "calling",
 
             # Indonesia
-            "sedang", "terhubung", "panggilan berlangsung",
-
+            "sedang", "terhubung", "panggilan berlangsung", "panggilan"
             # Umum vendor
             "call in progress", "in progress"
         ]
