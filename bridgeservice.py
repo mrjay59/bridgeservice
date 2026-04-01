@@ -535,18 +535,48 @@ def send_ussd_auto(adb, code, sim=0, keywords=None, timeout=20):
                     "final": message
                 }
 
-            # ================= PILIH MENU =================
+           # ================= PILIH MENU =================
             choice = None
 
+            # hanya jalan kalau masih ada keyword
             if step_index < len(keywords):
                 kw = keywords[step_index]
                 choice = pick_menu_by_keyword(message, kw)
+
+                print(f"[USSD AUTO] keyword: {kw} → choice: {choice}")
+
                 step_index += 1
 
-            if not choice:
-                choice = "1"  # fallback aman
+                # kalau keyword tidak ketemu → STOP
+                if not choice:
+                    print("[USSD AUTO] keyword tidak ditemukan, stop")
+                    adb.shell("input keyevent 4")
+                    return {
+                        **result,
+                        "ok": False,
+                        "error": f"keyword '{kw}' tidak ditemukan",
+                        "last_message": message
+                    }
 
-            print(f"[USSD AUTO] pilih: {choice}")
+            else:
+                # ✅ keyword sudah habis → STOP tanpa kirim apa-apa
+                print("[USSD AUTO] step selesai, return hasil")
+
+                # coba klik tombol CANCEL / BATAL
+                closed = click_by_resource_id(adb, "android:id/button2")
+
+                # fallback kalau tidak ada tombol cancel
+                if not closed:
+                    print("[USSD] tombol CANCEL tidak ketemu, fallback BACK")
+                    adb.shell("input keyevent 4")
+
+                time.sleep(0.5)
+
+                return {
+                    **result,
+                    "ok": True,
+                    "final": message
+                }
 
             # ================= INPUT (FIX) =================
 
@@ -830,7 +860,6 @@ class SMSHandler:
                 log_print(f"SMSHandler poll error: {e}", "ERROR")
 
             time.sleep(POLL_SMS_INTERVAL)
- 
 
 class WSClient:
     def __init__(self, url):
