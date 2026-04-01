@@ -548,16 +548,44 @@ def send_ussd_auto(adb, code, sim=0, keywords=None, timeout=20):
 
             print(f"[USSD AUTO] pilih: {choice}")
 
-            # ================= INPUT =================
-            focus_input_field(adb)
+            # ================= INPUT (FIX) =================
+
+            # 1. fokus ke input
+            if not focus_input_field(adb):
+                print("[USSD] input field tidak ditemukan")
+                return {**result, "error": "input field tidak ditemukan"}
+
             time.sleep(0.3)
 
+            # 2. CLEAR TEXT (WAJIB)
+            for _ in range(5):
+                adb.shell("input keyevent 67")  # DEL
+            time.sleep(0.3)
+
+            # 3. INPUT ANGKA
             adb.shell(f'input text "{choice}"')
             time.sleep(0.5)
 
-            click_by_resource_id(adb, "android:id/button1")
+            # 4. VALIDASI INPUT MASUK
+            adb.shell("uiautomator dump /sdcard/check.xml")
+            xml_check = adb.shell("cat /sdcard/check.xml")
 
-            time.sleep(2)
+            if choice not in xml_check:
+                print("[USSD] input tidak masuk, retry...")
+                
+                # retry sekali lagi
+                adb.shell(f'input text "{choice}"')
+                time.sleep(0.5)
+
+            # 5. KLIK SEND (WAJIB HARD CLICK)
+            clicked = click_by_resource_id(adb, "android:id/button1")
+
+            # fallback kalau gagal klik
+            if not clicked:
+                print("[USSD] tombol SEND tidak ketemu, fallback ENTER")
+                adb.shell("input keyevent 66")  # ENTER
+
+            time.sleep(2)            
 
         return {**result, "error": "max step reached"}
 
