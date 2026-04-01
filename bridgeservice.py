@@ -802,7 +802,7 @@ class SMSHandler:
                 log_print(f"SMSHandler poll error: {e}", "ERROR")
 
             time.sleep(POLL_SMS_INTERVAL)
-
+ 
 
 class WSClient:
     def __init__(self, url):
