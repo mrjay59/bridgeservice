@@ -55,6 +55,14 @@ except Exception as e:
 WS_SERVER = os.environ.get("BRIDGE_WS", "wss://ws.autocall.my.id/ws")
 HEARTBEAT_INTERVAL = int(os.environ.get("HEARTBEAT_INTERVAL", 1200))  # 20 minutes default
 POLL_SMS_INTERVAL = 3
+LOADING_KEYWORDS = [
+    "running", "ussd code running",
+    "memproses", "loading", "please wait"
+]
+
+ERROR_KEYWORDS = [
+    "mmi", "connection problem", "invalid"
+]
 
 def check_device_status(serial):
     url = "https://mrjay59.com/api/cpost/device/state" 
@@ -397,115 +405,22 @@ def _encode_ussd(code: str) -> str:
     # encode '#' etc
     return urllib.parse.quote(code, safe='')
 
-def send_ussd_auto(adb, code, sim=0, keywords=None, timeout=15):
-    """
-    USSD auto navigation by keyword
-    """
-    result = {
-        "ok": False,
-        "history": [],
-        "error": None
-    }
+def focus_input_field(adb):
+    adb.shell("uiautomator dump /sdcard/tmp.xml")
+    xml = adb.shell("cat /sdcard/tmp.xml")
 
-    try:
-        keywords = keywords or []
+    import xml.etree.ElementTree as ET
+    root = ET.fromstring(xml[xml.index("<?xml"):])
 
-        enc = _encode_ussd(code)
-        adb.shell(f'am start -a android.intent.action.CALL -d tel:{enc}')
-        time.sleep(1)
-
-        handle_sim_chooser(adb, sim)
-
-        step_index = 0
-
-        for i in range(10):
-            # ================= WAIT UI =================
-            start = time.time()
-            xml = ""
-
-            while time.time() - start < timeout:
-                adb.shell("uiautomator dump /sdcard/ussd.xml")
-                xml = adb.shell("cat /sdcard/ussd.xml")
-
-                if "android:id/message" in xml:
-                    break
-
-                time.sleep(1)
-
-            if not xml:
-                return {**result, "error": "no response"}
-
-            # ================= PARSE =================
-            import xml.etree.ElementTree as ET
-            root = ET.fromstring(xml[xml.index("<?xml"):])
-
-            message = None
-            for node in root.iter("node"):
-                if node.attrib.get("resource-id") == "android:id/message":
-                    message = node.attrib.get("text", "").strip()
-                    break
-
-            if not message:
-                continue
-
-            result["history"].append(message)
-
-            # ================= ERROR =================
-            if "mmi" in message.lower() or "connection problem" in message.lower():
-                adb.shell("input keyevent 4")
-                return {**result, "ok": False, "error": message}
-
-            # ================= CHECK INPUT =================
-            if "input_field" not in xml:
-                adb.shell("input keyevent 4")
-                return {**result, "ok": True, "final": message}
-
-            # ================= AUTO PICK =================
-            choice = None
-
-            if step_index < len(keywords):
-                kw = keywords[step_index]
-                choice = pick_menu_by_keyword(message, kw)
-                step_index += 1
-
-            # fallback
-            if not choice:
-                choice = "1"
-
-            print(f"[USSD AUTO] pilih: {choice}")
-
-            # ================= SEND =================
-            adb.shell(f'input text "{choice}"')
-            time.sleep(0.5)
-
-            click_by_resource_id(adb, "android:id/button1")
-
-            time.sleep(2)
-
-        return {**result, "error": "max step reached"}
-
-    except Exception as e:
-        return {**result, "error": str(e)}
-    
-def pick_menu_by_keyword(message, keyword):
-    """
-    Ambil nomor menu berdasarkan keyword
-    """
-    lines = message.splitlines()
-
-    for line in lines:
-        # contoh: "2.Spesial Buat U"
-        m = re.match(r"^\s*(\d+)[\.\)]\s*(.+)", line)
-        if not m:
-            continue
-
-        number = m.group(1)
-        text = m.group(2).lower()
-
-        if keyword.lower() in text:
-            return number
-
-    return None
+    for node in root.iter("node"):
+        if node.attrib.get("resource-id") == "com.android.phone:id/input_field":
+            bounds = node.attrib.get("bounds")
+            nums = list(map(int, re.findall(r"\d+", bounds)))
+            x1, y1, x2, y2 = nums
+            cx, cy = (x1+x2)//2, (y1+y2)//2
+            adb.shell(f"input tap {cx} {cy}")
+            return True
+    return False
 
 def click_by_resource_id(adb, rid):
     adb.shell("uiautomator dump /sdcard/tmp.xml")
@@ -518,12 +433,137 @@ def click_by_resource_id(adb, rid):
         if node.attrib.get("resource-id") == rid:
             bounds = node.attrib.get("bounds")
             nums = list(map(int, re.findall(r"\d+", bounds)))
-            x1,y1,x2,y2 = nums
-            cx,cy = (x1+x2)//2,(y1+y2)//2
+            x1, y1, x2, y2 = nums
+            cx, cy = (x1+x2)//2, (y1+y2)//2
             adb.shell(f"input tap {cx} {cy}")
             return True
     return False
 
+def pick_menu_by_keyword(message, keyword):
+    lines = message.splitlines()
+
+    for line in lines:
+        m = re.match(r"^\s*(\d+)[\.\)]\s*(.+)", line)
+        if not m:
+            continue
+
+        number = m.group(1)
+        text = m.group(2).lower()
+
+        if keyword.lower() in text:
+            return number
+
+    return None
+
+def send_ussd_auto(adb, code, sim=0, keywords=None, timeout=20):
+    result = {
+        "ok": False,
+        "history": [],
+        "final": None,
+        "error": None
+    }
+
+    try:
+        if not code:
+            return {**result, "error": "USSD code kosong"}
+
+        keywords = keywords or []
+
+        # ================= DIAL =================
+        enc = _encode_ussd(code)
+        adb.shell(f'am start -a android.intent.action.CALL -d tel:{enc}')
+        time.sleep(1)
+
+        handle_sim_chooser(adb, sim)
+
+        step_index = 0
+
+        for _ in range(10):
+
+            # ================= WAIT UI =================
+            start = time.time()
+            message = None
+            xml = ""
+
+            while time.time() - start < timeout:
+                adb.shell("uiautomator dump /sdcard/ussd.xml")
+                xml = adb.shell("cat /sdcard/ussd.xml")
+
+                if not xml or "<?xml" not in xml:
+                    time.sleep(1)
+                    continue
+
+                import xml.etree.ElementTree as ET
+                root = ET.fromstring(xml[xml.index("<?xml"):])
+
+                for node in root.iter("node"):
+                    if node.attrib.get("resource-id") == "android:id/message":
+                        txt = (node.attrib.get("text") or "").strip()
+
+                        if not txt:
+                            continue
+
+                        # ❌ skip loading
+                        if any(k in txt.lower() for k in LOADING_KEYWORDS):
+                            message = None
+                            break
+
+                        message = txt
+                        break
+
+                if message:
+                    break
+
+                time.sleep(1)
+
+            if not message:
+                return {**result, "error": "tidak ada response ussd"}
+
+            result["history"].append(message)
+
+            # ================= ERROR =================
+            if any(k in message.lower() for k in ERROR_KEYWORDS):
+                adb.shell("input keyevent 4")
+                return {**result, "error": message}
+
+            # ================= FINAL (no input) =================
+            if "input_field" not in xml:
+                adb.shell("input keyevent 4")
+                return {
+                    **result,
+                    "ok": True,
+                    "final": message
+                }
+
+            # ================= PILIH MENU =================
+            choice = None
+
+            if step_index < len(keywords):
+                kw = keywords[step_index]
+                choice = pick_menu_by_keyword(message, kw)
+                step_index += 1
+
+            if not choice:
+                choice = "1"  # fallback aman
+
+            print(f"[USSD AUTO] pilih: {choice}")
+
+            # ================= INPUT =================
+            focus_input_field(adb)
+            time.sleep(0.3)
+
+            adb.shell(f'input text "{choice}"')
+            time.sleep(0.5)
+
+            click_by_resource_id(adb, "android:id/button1")
+
+            time.sleep(2)
+
+        return {**result, "error": "max step reached"}
+
+    except Exception as e:
+        return {**result, "error": str(e)}
+    
 # --- Fungsi helper untuk cellular call (standalone) ---
 def clean_phone_number(number):
     """
