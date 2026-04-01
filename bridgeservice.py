@@ -989,10 +989,10 @@ class WSClient:
                     try:
                         res = send_ussd_auto(self.adb, code, sim, keywords)
 
-                        self.wss_send({
+                        self.ws.send(json.dumps({
                             "event": "ussd_result",
                             "data": res
-                        })
+                        }))
 
                     except Exception as e:
                         res = {"ok": False, "msg": str(e)}
