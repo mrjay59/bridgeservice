@@ -397,186 +397,132 @@ def _encode_ussd(code: str) -> str:
     # encode '#' etc
     return urllib.parse.quote(code, safe='')
 
-def send_ussd_and_read(adb: AdbWrapper, code: str, sim: int = 0, wait_response_sec: int = 6):
+def send_ussd_auto(adb, code, sim=0, keywords=None, timeout=15):
     """
-    Dial USSD code and attempt to force-select SIM (sim=0 SIM1, sim=1 SIM2).
-    Returns dict with keys: ok, error, raw_ui, ussd_text
+    USSD auto navigation by keyword
     """
-    result = {"ok": False, "error": None, "raw_ui": None, "ussd_text": None}
+    result = {
+        "ok": False,
+        "history": [],
+        "error": None
+    }
+
     try:
-        if not code:
-            result['error'] = "empty code"
-            return result
-        enc = _encode_ussd(code)  # *999%23
-        sim_index = int(sim) if sim is not None else 0
+        keywords = keywords or []
 
-        # try dialing with several intent variants
-        intents = [
-            f"am start -a android.intent.action.CALL -d tel:{enc}",
-            f"am start -a android.intent.action.CALL -d tel:{enc} --ei android.telecom.extra.SIM_SLOT_INDEX {sim_index}",
-            f"am start -a android.intent.action.CALL -d tel:{enc} --ei simSlot {sim_index} --ei subscription {sim_index} --ei com.android.phone.extra.slot {sim_index}",
-        ]
-        dialed = False
-        for it in intents:
-            try:
-                adb.shell(it)
-                dialed = True
-                time.sleep(0.3)
-            except Exception:
-                pass
-        if not dialed:
-            result['error'] = "failed to send dial intent"
-            return result
+        enc = _encode_ussd(code)
+        adb.shell(f'am start -a android.intent.action.CALL -d tel:{enc}')
+        time.sleep(1)
 
-        # Wait shortly for chooser/ussd popup
-        time.sleep(0.8)
+        handle_sim_chooser(adb, sim)
 
-        # If uiautomator2 available, try to click SIM choice then capture hierarchy
-        if UIAUTOMATOR2_AVAILABLE:
-            try:
-                d = u2.connect()  # may throw if cannot connect
-                # try to click via common labels
-                sim_labels = ["SIM 1","SIM 2","SIM1","SIM2","Use SIM 1","Use SIM 2","Pilih SIM","Pilih kartu","Kartu 1","Kartu 2","Call with SIM 1","Call with SIM 2","Panggil dengan SIM 1","Panggil dengan SIM 2"]
-                chosen = False
-                for lbl in sim_labels:
-                    try:
-                        e = d(text=lbl)
-                        if e.exists:
-                            e.click()
-                            chosen = True
-                            break
-                    except Exception:
-                        pass
-                # try to click first/second button if still not chosen
-                if not chosen:
-                    try:
-                        buttons = d(className="android.widget.Button")
-                        if buttons.exists:
-                            idx = 0 if sim_index==0 else (1 if buttons.count>1 else 0)
-                            buttons[idx].click()
-                            chosen = True
-                    except Exception:
-                        pass
-                # wait for USSD response to appear
-                time.sleep(wait_response_sec)
-                ui_dump = d.dump_hierarchy()
-                result['raw_ui'] = ui_dump
-                # parse XML and extract large text blocks
-                try:
-                    import xml.etree.ElementTree as ET
-                    root = ET.fromstring(ui_dump)
-                    texts = []
-                    for node in root.iter('node'):
-                        txt = node.attrib.get('text') or node.attrib.get('content-desc') or ''
-                        if txt and len(txt.strip())>3:
-                            texts.append(txt.strip())
-                    if texts:
-                        result['ussd_text'] = max(texts, key=lambda s: len(s))
-                except Exception:
-                    pass
-                result['ok'] = True
-                return result
-            except Exception as e:
-                # u2 connect/click failed -> fallback to dump method
-                #print("u2 error:", e)
-                pass
+        step_index = 0
 
-        # Fallback: uiautomator dump + parse + click coordinates if chooser present
-        chosen = False
-        for attempt in range(4):
-            try:
-                adb.shell('uiautomator dump /sdcard/ussd_dump.xml')
-                local_tmp = '/data/data/com.termux/files/home/bridgeservice/ussd_dump.xml'
-                # pull or read
-                try:
-                    adb.pull('/sdcard/ussd_dump.xml', local_tmp)
-                    xml_text = open(local_tmp, 'r', encoding='utf-8', errors='ignore').read()
-                except Exception:
-                    xml_text = adb.shell('cat /sdcard/ussd_dump.xml') or ""
-                result['raw_ui'] = xml_text
-                # parse xml for candidate buttons / text nodes
-                try:
-                    import xml.etree.ElementTree as ET
-                    root = ET.fromstring(xml_text)
-                    candidates = []
-                    for node in root.iter('node'):
-                        cls = node.attrib.get('class','')
-                        text = (node.attrib.get('text') or node.attrib.get('content-desc') or "").strip()
-                        bounds = node.attrib.get('bounds','')
-                        if bounds and ( 'Button' in cls or 'TextView' in cls or text):
-                            candidates.append((text, bounds))
-                    # find SIM-labeled node
-                    target_bounds = None
-                    sim_targets = ['SIM 1','SIM 2','SIM1','SIM2','SIM 1','SIM 2','Pilih SIM','Pilih kartu','kartu SIM 1','kartu SIM 2','Kartu 1','Kartu 2']
-                    for text,bounds in candidates:
-                        if not text:
-                            continue
-                        tlow = text.lower()
-                        for st in sim_targets:
-                            if st.lower() in tlow:
-                                # choose matching sim index if present
-                                if str(sim+1) in tlow or ('sim 1' in st.lower() and sim==0) or ('sim 2' in st.lower() and sim==1):
-                                    target_bounds = bounds
-                                    break
-                                else:
-                                    target_bounds = bounds
-                                    break
-                        if target_bounds:
-                            break
-                    # fallback pick by order
-                    if not target_bounds and candidates:
-                        nonempty = [c for c in candidates if c[0]]
-                        if nonempty:
-                            idx = sim if sim < len(nonempty) else 0
-                            target_bounds = nonempty[idx][1]
-                    if target_bounds:
-                        m = re.findall(r'\[(-?\d+),(-?\d+)\]', target_bounds)
-                        if len(m)>=2:
-                            l,t = map(int, m[0]); r,b = map(int, m[1])
-                            cx = (l+r)//2; cy = (t+b)//2
-                            adb.shell(f"input tap {cx} {cy}")
-                            chosen = True
-                            time.sleep(1.2)
-                            break
-                except Exception:
-                    pass
-            except Exception:
-                pass
-            time.sleep(0.8)
+        for i in range(10):
+            # ================= WAIT UI =================
+            start = time.time()
+            xml = ""
 
-        # After selecting (or if chooser didn't appear), wait for USSD response and dump xml
-        time.sleep(wait_response_sec)
-        try:
-            adb.shell('uiautomator dump /sdcard/ussd_dump.xml')
-            local_tmp = '/data/data/com.termux/files/home/bridgeservice/ussd_dump.xml'
-            try:
-                adb.pull('/sdcard/ussd_dump.xml', local_tmp)
-                xml_text = open(local_tmp, 'r', encoding='utf-8', errors='ignore').read()
-            except Exception:
-                xml_text = adb.shell('cat /sdcard/ussd_dump.xml') or ""
-            result['raw_ui'] = xml_text
-            # parse text blocks
-            try:
-                import xml.etree.ElementTree as ET
-                root = ET.fromstring(xml_text)
-                texts = []
-                for node in root.iter('node'):
-                    txt = node.attrib.get('text') or node.attrib.get('content-desc') or ''
-                    if txt and len(txt.strip())>3:
-                        texts.append(txt.strip())
-                if texts:
-                    result['ussd_text'] = max(texts, key=lambda s: len(s))
-            except Exception:
-                pass
-        except Exception:
-            pass
+            while time.time() - start < timeout:
+                adb.shell("uiautomator dump /sdcard/ussd.xml")
+                xml = adb.shell("cat /sdcard/ussd.xml")
 
-        result['ok'] = True
-        return result
+                if "android:id/message" in xml:
+                    break
+
+                time.sleep(1)
+
+            if not xml:
+                return {**result, "error": "no response"}
+
+            # ================= PARSE =================
+            import xml.etree.ElementTree as ET
+            root = ET.fromstring(xml[xml.index("<?xml"):])
+
+            message = None
+            for node in root.iter("node"):
+                if node.attrib.get("resource-id") == "android:id/message":
+                    message = node.attrib.get("text", "").strip()
+                    break
+
+            if not message:
+                continue
+
+            result["history"].append(message)
+
+            # ================= ERROR =================
+            if "mmi" in message.lower() or "connection problem" in message.lower():
+                adb.shell("input keyevent 4")
+                return {**result, "ok": False, "error": message}
+
+            # ================= CHECK INPUT =================
+            if "input_field" not in xml:
+                adb.shell("input keyevent 4")
+                return {**result, "ok": True, "final": message}
+
+            # ================= AUTO PICK =================
+            choice = None
+
+            if step_index < len(keywords):
+                kw = keywords[step_index]
+                choice = pick_menu_by_keyword(message, kw)
+                step_index += 1
+
+            # fallback
+            if not choice:
+                choice = "1"
+
+            print(f"[USSD AUTO] pilih: {choice}")
+
+            # ================= SEND =================
+            adb.shell(f'input text "{choice}"')
+            time.sleep(0.5)
+
+            click_by_resource_id(adb, "android:id/button1")
+
+            time.sleep(2)
+
+        return {**result, "error": "max step reached"}
 
     except Exception as e:
-        result['error'] = str(e)
-        return result
+        return {**result, "error": str(e)}
+    
+def pick_menu_by_keyword(message, keyword):
+    """
+    Ambil nomor menu berdasarkan keyword
+    """
+    lines = message.splitlines()
+
+    for line in lines:
+        # contoh: "2.Spesial Buat U"
+        m = re.match(r"^\s*(\d+)[\.\)]\s*(.+)", line)
+        if not m:
+            continue
+
+        number = m.group(1)
+        text = m.group(2).lower()
+
+        if keyword.lower() in text:
+            return number
+
+    return None
+
+def click_by_resource_id(adb, rid):
+    adb.shell("uiautomator dump /sdcard/tmp.xml")
+    xml = adb.shell("cat /sdcard/tmp.xml")
+
+    import xml.etree.ElementTree as ET
+    root = ET.fromstring(xml[xml.index("<?xml"):])
+
+    for node in root.iter("node"):
+        if node.attrib.get("resource-id") == rid:
+            bounds = node.attrib.get("bounds")
+            nums = list(map(int, re.findall(r"\d+", bounds)))
+            x1,y1,x2,y2 = nums
+            cx,cy = (x1+x2)//2,(y1+y2)//2
+            adb.shell(f"input tap {cx} {cy}")
+            return True
+    return False
 
 # --- Fungsi helper untuk cellular call (standalone) ---
 def clean_phone_number(number):
@@ -1038,8 +984,16 @@ class WSClient:
                 elif platform == "USSD":
                     code = item.get("text")
                     sim = item.get("sim", 0)
+                    keywords = item.get("auto", [])
+
                     try:
-                        res = send_ussd_and_read(self.adb, code, sim)
+                        res = send_ussd_auto(self.adb, code, sim, keywords)
+
+                        self.wss_send({
+                            "event": "ussd_result",
+                            "data": res
+                        })
+
                     except Exception as e:
                         res = {"ok": False, "msg": str(e)}
 
@@ -1302,6 +1256,7 @@ class WSClient:
                 "seconds": seconds,
                 "number": number
             }
+    
     def process_sms(self, item):           
         permission = item.get("permission")       
         delay = item.get("delay")         
